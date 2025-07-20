@@ -49,7 +49,7 @@ impl DynamoDbConfig {
     ///
     /// ```
     /// # use shared::DynamoDbConfig;
-    /// let config = DynamoDbConfig::new("myapp", "dev", "us-west-2");
+    /// let config = DynamoDbConfig::new("myapp", "dev", "us-east-1");
     /// ```
     pub fn new(table_prefix: &str, environment: &str, region: &str) -> Self {
         Self {
@@ -69,7 +69,7 @@ impl DynamoDbConfig {
     ///
     /// ```
     /// # use shared::DynamoDbConfig;
-    /// let config = DynamoDbConfig::new("passkey", "dev", "us-west-2");
+    /// let config = DynamoDbConfig::new("passkey", "dev", "us-east-1");
     /// assert_eq!(config.table_name("users"), "passkey-users-dev");
     /// ```
     pub fn table_name(&self, table_type: &str) -> String {
@@ -100,7 +100,7 @@ impl DynamoDbConfig {
 /// # use anyhow::Result;
 /// # use shared::{DynamoDbConfig, create_dynamodb_tables};
 /// # async fn example() -> Result<()> {
-/// let config = DynamoDbConfig::new("passkey", "dev", "us-west-2");
+/// let config = DynamoDbConfig::new("passkey", "dev", "us-east-1");
 /// create_dynamodb_tables(&config).await?;
 /// # Ok(())
 /// # }

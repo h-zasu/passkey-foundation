@@ -19,7 +19,7 @@ enum Command {
     /// Initialize AWS resources and development environment
     Init {
         /// AWS region to deploy to
-        #[arg(short, long, default_value = "us-west-2")]
+        #[arg(short, long, default_value = "us-east-1")]
         region: String,
         /// Environment name (dev, staging, prod)
         #[arg(short, long, default_value = "dev")]
@@ -28,7 +28,7 @@ enum Command {
     /// Build and deploy Lambda functions
     Deploy {
         /// AWS region to deploy to
-        #[arg(short, long, default_value = "us-west-2")]
+        #[arg(short, long, default_value = "us-east-1")]
         region: String,
         /// Environment name (dev, staging, prod)
         #[arg(short, long, default_value = "dev")]
@@ -506,7 +506,7 @@ async fn clean_aws_resources(env: &str) -> Result<()> {
     let iam_client = aws_sdk_iam::Client::new(&config);
 
     // Delete DynamoDB tables
-    let db_config = DynamoDbConfig::new("passkey", env, "us-west-2");
+    let db_config = DynamoDbConfig::new("passkey", env, "us-east-1");
     let tables = vec![
         "users",
         "credentials",

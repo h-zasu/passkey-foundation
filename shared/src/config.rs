@@ -11,8 +11,6 @@ use std::env;
 /// Global service configuration.
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
-    /// AWS region
-    pub aws_region: String,
     /// Environment name (dev, staging, prod)
     pub environment: String,
     /// DynamoDB table prefix
@@ -31,7 +29,6 @@ impl ServiceConfig {
     /// Loads configuration from environment variables.
     pub fn from_env() -> Result<Self, PasskeyError> {
         Ok(Self {
-            aws_region: env::var("AWS_REGION").unwrap_or_else(|_| "us-west-2".to_string()),
             environment: env::var("ENVIRONMENT").unwrap_or_else(|_| "dev".to_string()),
             table_prefix: env::var("TABLE_PREFIX").unwrap_or_else(|_| "passkey".to_string()),
             cors_origins: env::var("CORS_ORIGINS")
@@ -78,10 +75,9 @@ pub struct AwsConfig {
 }
 
 impl AwsConfig {
-    /// Creates a new AWS configuration with initialized clients.
-    pub async fn new(region: &str) -> Result<Self, PasskeyError> {
+    /// Creates a new AWS configuration with initialized clients using AWS standard configuration resolution.
+    pub async fn new() -> Result<Self, PasskeyError> {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(region.to_string()))
             .load()
             .await;
 
@@ -215,7 +211,6 @@ mod tests {
     #[test]
     fn test_service_config_table_name() {
         let config = ServiceConfig {
-            aws_region: "us-west-2".to_string(),
             environment: "test".to_string(),
             table_prefix: "passkey".to_string(),
             cors_origins: vec!["http://localhost:3000".to_string()],
@@ -299,7 +294,6 @@ mod tests {
         let config = ServiceConfig::from_env().unwrap();
 
         // Just test that the config is created successfully with some reasonable values
-        assert!(!config.aws_region.is_empty());
         assert!(!config.environment.is_empty());
         assert!(!config.table_prefix.is_empty());
         assert!(!config.cors_origins.is_empty());
@@ -312,7 +306,6 @@ mod tests {
     fn test_service_config_table_name_with_prefix() {
         // Test table_name function without environment variable manipulation
         let config = ServiceConfig {
-            aws_region: "us-west-2".to_string(),
             environment: "test".to_string(),
             table_prefix: "custom".to_string(),
             cors_origins: vec!["http://localhost:3000".to_string()],
@@ -323,7 +316,6 @@ mod tests {
 
         assert_eq!(config.table_name("users"), "custom-users-test");
         assert_eq!(config.table_name("sessions"), "custom-sessions-test");
-        assert_eq!(config.aws_region, "us-west-2");
         assert_eq!(config.environment, "test");
         assert_eq!(config.default_jwt_expires_in, 7200);
         assert_eq!(config.default_session_timeout, 600);
@@ -334,7 +326,6 @@ mod tests {
     fn test_service_config_cors_parsing() {
         // Test CORS origins parsing without environment manipulation
         let config = ServiceConfig {
-            aws_region: "us-west-2".to_string(),
             environment: "test".to_string(),
             table_prefix: "passkey".to_string(),
             cors_origins: vec![
