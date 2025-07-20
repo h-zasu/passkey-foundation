@@ -113,10 +113,12 @@ curl -X POST https://auth.example.com/graphql \
 
 ### プロジェクト構造
 ```
-passkey/
+passkey-foundation/
 ├── .cargo/config.toml     # Cargoエイリアスとビルド設定
 ├── .claude_workflow/      # 開発ワークフロー文書
 ├── Cargo.toml            # ワークスペース設定
+├── README.md             # プロジェクト概要とセットアップ
+├── CONTRIBUTING.md       # 開発プロセスと技術詳細
 ├── xtask/                # ビルドとデプロイメントの自動化
 │   ├── Cargo.toml
 │   └── src/main.rs

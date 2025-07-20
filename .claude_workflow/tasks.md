@@ -12,75 +12,109 @@
 3. **Phase 3: GraphQL API実装** - スキーマ、リゾルバー、Lambda関数
 4. **Phase 4: 統合・デプロイ** - xtask完全実装、テスト、AWSデプロイ
 
-## Phase 1: 基盤実装 (Priority: HIGH)
+## ドキュメント構造の更新
 
-### 1.1 Cargoワークスペース整理
-**Status**: 未着手  
+新しいプロジェクト構造に合わせて：
+- **README.md**: プロジェクト概要、セットアップ手順、API利用例
+- **CONTRIBUTING.md**: 開発プロセス、技術仕様、コーディング規約
+- **.claude_workflow/**: 実装タスクの詳細管理
+
+## Phase 1: 基盤実装 ✅ **完了** (Priority: HIGH)
+**ブランチ**: `feature/passkey-foundation`  
+**PR**: [Passkey認証基盤: 依存関係とコア基盤モジュール実装](https://github.com/h-zasu/passkey-foundation/pull/1)  
+**Status**: PRレビュー中
+
+### 1.1 Cargoワークスペース整理 ✅
+**Status**: 完了  
 **Estimate**: 30分  
 **Dependencies**: None  
 
-- [ ] `Cargo.toml` ワークスペース設定更新
+- [x] `Cargo.toml` ワークスペース設定更新
   - async-graphql 7.x 追加
   - lambda_runtime 0.14.2 追加
   - webauthn-rs 0.5.2 追加
   - その他必要依存関係追加
-- [ ] `lambda/Cargo.toml` 依存関係更新
-- [ ] `shared/Cargo.toml` 依存関係更新
-- [ ] `xtask/Cargo.toml` 依存関係更新
+- [x] `lambda/Cargo.toml` 依存関係更新
+- [x] `shared/Cargo.toml` 依存関係更新
+- [x] `xtask/Cargo.toml` 依存関係更新
 
-### 1.2 sharedクレート基盤実装
-**Status**: 未着手  
+### 1.2 sharedクレート基盤実装 ✅
+**Status**: 完了  
 **Estimate**: 2時間  
 **Dependencies**: 1.1 完了後  
 
-- [ ] `shared/src/types.rs` 拡張
+- [x] `shared/src/types.rs` 拡張
   - PendingUser 構造体追加
   - AppConfig 構造体拡張
   - SessionType, UserRole 列挙型追加
   - GraphQL対応用のデシリアライザ追加
-- [ ] `shared/src/config.rs` 新規作成
+- [x] `shared/src/config.rs` 新規作成
   - 環境変数管理
   - AWS SDK設定
   - WebAuthn設定
-- [ ] `shared/src/errors.rs` 新規作成
+- [x] `shared/src/errors.rs` 新規作成
   - PasskeyError エラー型定義
   - thiserror 統合
   - GraphQLエラー変換
 
-### 1.3 DynamoDB操作拡張
-**Status**: 未着手  
+### 1.3 DynamoDB操作拡張 ✅
+**Status**: 完了  
 **Estimate**: 3時間  
 **Dependencies**: 1.2 完了後  
 
-- [ ] `shared/src/dynamodb.rs` 拡張
+- [x] `shared/src/dynamodb.rs` 拡張
   - PendingUsers テーブル作成関数
   - AppConfigs テーブル作成関数
   - Users/Credentials/Sessions テーブルのapp_id対応
   - GSI設定とTTL設定
-- [ ] CRUD操作関数実装
+- [x] CRUD操作関数実装
   - create_user, get_user, update_user
   - create_credential, get_credentials_by_user
   - create_session, get_session, update_session
   - create_pending_user, get_pending_user, delete_pending_user
   - get_app_config
 
-### 1.4 基本xtaskコマンド実装
-**Status**: 未着手  
+### 1.4 基本xtaskコマンド実装 ✅
+**Status**: 完了  
 **Estimate**: 2時間  
 **Dependencies**: 1.3 完了後  
 
-- [ ] `xtask/src/main.rs` 拡張
+- [x] `xtask/src/main.rs` 拡張
   - CLI構造定義（init, deploy, domain, test, clean）
   - AWSクライアント初期化
-- [ ] initコマンド実装
+- [x] initコマンド実装
   - DynamoDBテーブル作成（新テーブル含む）
   - IAMロール作成スケルトン
   - 環境設定ファイル生成
-- [ ] cleanコマンド実装
+- [x] cleanコマンド実装
+
+### 1.5 Phase 1 単体テスト実装 ✅
+**Status**: 完了  
+**Estimate**: 1時間  
+**Dependencies**: 1.4 完了後  
+
+- [x] shared クレートの単体テスト
+  - types.rs のデータ構造テスト
+  - config.rs の設定読み込みテスト
+  - errors.rs のエラー変換テスト
+- [x] DynamoDB操作の単体テスト
+- [x] xtask基本機能テスト
+
+### 1.6 Phase 1 完了・PR提出 ✅
+**Status**: 完了  
+**Estimate**: 30分  
+**Dependencies**: 1.5 完了後  
+
+- [x] ブランチ作成: `feature/passkey-foundation`
+- [x] PR作成・提出
+- [x] CI/CDパイプライン確認
+- [x] コードレビュー依頼
 
 ---
 
 ## Phase 2: コア機能実装 (Priority: HIGH)
+**予定ブランチ**: `feature/phase2-core-features`  
+**Dependencies**: Phase 1 PR承認・マージ後
 
 ### 2.1 WebAuthn統合
 **Status**: 未着手  
@@ -135,9 +169,39 @@
 - [ ] アプリ毎の署名キー管理
 - [ ] JWTリボケーション機構（将来拡張）
 
+### 2.5 Phase 2 単体テスト実装
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: 2.4 完了後  
+
+- [ ] WebAuthn統合テスト
+  - チャレンジ生成・検証テスト
+  - 公開鍵処理テスト
+- [ ] OTP機能テスト
+  - 生成・検証・期限切れテスト
+  - ブルートフォース対策テスト
+- [ ] メール送信テスト
+  - SESシミュレータテスト
+  - テンプレート処理テスト
+- [ ] JWT認証テスト
+  - 生成・検証・期限切れテスト
+  - アプリ別署名テスト
+
+### 2.6 Phase 2 完了・PR提出
+**Status**: 未着手  
+**Estimate**: 30分  
+**Dependencies**: 2.5 完了後  
+
+- [ ] ブランチ作成: `feature/phase2-core-features`
+- [ ] PR作成・提出
+- [ ] CI/CDパイプライン確認
+- [ ] コードレビュー依頼
+
 ---
 
 ## Phase 3: GraphQL API実装 (Priority: HIGH)
+**予定ブランチ**: `feature/phase3-graphql-api`  
+**Dependencies**: Phase 2 PR承認・マージ後
 
 ### 3.1 Lambda関数基盤
 **Status**: 未着手  
@@ -241,9 +305,37 @@
 - [ ] 構造化ログ出力実装（tracing）
 - [ ] CloudWatchログ統合
 
+### 3.8 Phase 3 統合テスト実装
+**Status**: 未着手  
+**Estimate**: 4時間  
+**Dependencies**: 3.7 完了後  
+
+- [ ] GraphQLエンドツーエンドテスト
+  - 全リゾルバーの動作確認
+  - 認証フロー統合テスト
+  - エラーハンドリングテスト
+- [ ] Lambda関数統合テスト
+  - ローカル実行テスト
+  - AWS環境シミュレーションテスト
+- [ ] DynamoDB統合テスト
+  - 実際のテーブル操作テスト
+  - パフォーマンステスト
+
+### 3.9 Phase 3 完了・PR提出
+**Status**: 未着手  
+**Estimate**: 30分  
+**Dependencies**: 3.8 完了後  
+
+- [ ] ブランチ作成: `feature/phase3-graphql-api`
+- [ ] PR作成・提出
+- [ ] CI/CDパイプライン確認
+- [ ] コードレビュー依頼
+
 ---
 
 ## Phase 4: 統合・デプロイ (Priority: MEDIUM)
+**予定ブランチ**: `feature/phase4-deployment`  
+**Dependencies**: Phase 3 PR承認・マージ後
 
 ### 4.1 xtaskデプロイ機能
 **Status**: 未着手  
@@ -311,6 +403,17 @@
 - [ ] クライアント統合ガイド作成
 - [ ] トラブルシューティングガイド作成
 
+### 4.6 Phase 4 完了・PR提出
+**Status**: 未着手  
+**Estimate**: 30分  
+**Dependencies**: 4.5 完了後  
+
+- [ ] ブランチ作成: `feature/phase4-deployment`
+- [ ] PR作成・提出
+- [ ] CI/CDパイプライン確認
+- [ ] 本番デプロイ準備確認
+- [ ] コードレビュー依頼
+
 ---
 
 ## リスク・ブロッカー分析
@@ -332,10 +435,12 @@
 
 ## 成功指標
 
-### Phase 1 完了時
-- [ ] cargo build が全クレートで成功
-- [ ] DynamoDBテーブルが作成される
-- [ ] 基本CRUD操作が動作
+### Phase 1 完了時 ✅
+- [x] cargo build が全クレートで成功
+- [x] DynamoDBテーブルが作成される
+- [x] 基本CRUD操作が動作
+- [x] 単体テストが全て成功
+- [x] PR提出・レビュー中
 
 ### Phase 2 完了時
 - [ ] WebAuthnチャレンジ生成・検証が動作
@@ -357,19 +462,23 @@
 
 ## タスク総計
 
-- **総タスク数**: 45タスク
-- **総作業時間**: 約63時間
-- **クリティカルパス**: Phase 1 → 2 → 3 → 4
-- **最初のPhase 1完了目標**: 1週間
-- **全体完了目標**: 3-4週間
+- **総タスク数**: 54タスク
+- **総作業時間**: 約70時間
+- **完了タスク数**: 11タスク (Phase 1完了)
+- **残りタスク数**: 43タスク
+- **クリティカルパス**: Phase 1 ✅ → Phase 2 → Phase 3 → Phase 4
+- **Phase 1完了**: ✅ (PR提出済み)
+- **残り完了目標**: 2-3週間
 
 ## 実行ルール
 
 ### 段階的実行
-1. **Phaseごとの進行**: 前Phaseが完了してから次へ
-2. **単一タスク集中**: 複数タスクを同時並行で進めない
-3. **エラー優先解決**: エラーを無視して次のステップに進まない
-4. **段階的変更**: 一度に全てを変更せず、小さな変更を積み重ねる
+1. **Phaseごとの進行**: 前PhaseのPRがマージされてから次へ
+2. **ブランチ戦略**: 各Phaseで新しいfeatureブランチを作成
+3. **PR駆動開発**: 各Phase完了時にPR提出・レビュー
+4. **単一タスク集中**: 複数タスクを同時並行で進めない
+5. **エラー優先解決**: エラーを無視して次のステップに進まない
+6. **段階的変更**: 一度に全てを変更せず、小さな変更を積み重ねる
 
 ### タスク管理
 1. **進捗の可視化**: 各タスクのステータスを随時更新
@@ -381,10 +490,20 @@
 1. **Rust edition 2024使用**: 最新の言語機能活用
 2. **async/await**: 非同期処理の統一
 3. **セキュリティ**: ベストプラクティス遵守
-4. **テスト**: 実装と並行してテスト実行
+4. **TDD**: 各Phaseで単体テスト実装必須
+5. **CI/CD**: 自動テスト・リント・フォーマットチェック
+6. **コードレビュー**: PR毎の必須レビュー
 
-## 次のアクション
+## 現在の状況
 
-**タスク化フェーズが完了しました。実行フェーズに進んでよろしいですか？**
+**Phase 1完了**: ✅ PR提出済み (`feature/passkey-foundation`)
+**現在のフェーズ**: Phase 1 PRレビュー待ち
+**次のアクション**: Phase 1 PRマージ後、Phase 2開始
 
-実行フェーズでは、Phase 1から順次タスクを実行し、進捗を `tasks.md` に更新していきます。
+## 次のPhase開始条件
+
+**Phase 2開始**: Phase 1 PRがマージされ次第
+1. 新ブランチ `feature/phase2-core-features` 作成
+2. WebAuthn統合から開始
+3. 各タスク完了後、単体テスト実装
+4. Phase 2完了後、PR提出
