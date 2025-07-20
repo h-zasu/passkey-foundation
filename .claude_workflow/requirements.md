@@ -9,7 +9,10 @@
 ### 主要機能
 
 1. **GraphQL認証基盤**: 各種アプリケーションが利用する型安全なAPI
-2. **ユーザー管理機能**: 管理者によるユーザー登録管理
+2. **柔軟なユーザー登録管理**: 
+   - 管理者招待による登録（従来方式）
+   - ユーザー自由登録（新機能）
+   - アプリ設定による登録方式の制御
 3. **セキュアな登録フロー**: ワンタイムパスワード（OTP）による認証
 4. **マルチアプリケーション対応**: app_id分離による複数アプリ対応
 
@@ -180,6 +183,13 @@ type Mutation {
   # 管理者によるユーザー招待
   inviteUser(appId: String!, email: String!): InviteResult!
   
+  # ユーザー自由登録（新機能）
+  selfRegister(
+    appId: String!, 
+    email: String!, 
+    displayName: String!
+  ): InviteResult!
+  
   # OTP検証・WebAuthn登録開始
   verifyOtpAndStartRegistration(
     appId: String!,
@@ -242,6 +252,22 @@ enum UserRole {
   SUPER_ADMIN
 }
 
+enum RegistrationMode {
+  INVITE_ONLY       # 管理者招待のみ
+  PUBLIC_REGISTRATION # ユーザー自由登録
+}
+
+type AppConfig {
+  appId: String!
+  name: String!
+  relyingPartyId: String!
+  allowedOrigins: [String!]!
+  registrationMode: RegistrationMode!
+  autoApproveRegistration: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
 type AuthenticationResult {
   accessToken: String!
   userId: ID!
@@ -249,9 +275,9 @@ type AuthenticationResult {
 }
 ```
 
-## OTPによる登録フロー
+## 登録フロー
 
-### 1. 管理者による事前登録
+### パターン1: 管理者による事前登録（従来方式）
 ```graphql
 mutation InviteUser {
   inviteUser(appId: "myapp", email: "user@example.com") {
@@ -262,7 +288,22 @@ mutation InviteUser {
 }
 ```
 
-### 2. ユーザーによる登録完了
+### パターン2: ユーザー自由登録（新機能）
+```graphql
+mutation SelfRegister {
+  selfRegister(
+    appId: "myapp", 
+    email: "user@example.com", 
+    displayName: "John Doe"
+  ) {
+    success
+    pendingUserId
+    message
+  }
+}
+```
+
+### 共通: 登録完了フロー（両パターン共通）
 ```graphql
 # OTP検証とWebAuthn開始
 mutation VerifyOTP {
@@ -325,8 +366,26 @@ AppConfig {
     jwt_expires_in: 3600,                    // 1時間
     session_timeout_seconds: 300,            // 5分
     otp_expires_in: 1800,                    // 30分
+    
+    // 新機能: 登録方式制御
+    registration_mode: RegistrationMode::PublicRegistration,  // or InviteOnly
+    auto_approve_registration: true,         // 自動承認 or 管理者承認
 }
 ```
+
+### 登録方式の制御
+
+#### INVITE_ONLY（招待のみ）
+- 管理者が`inviteUser`でユーザーを事前登録
+- `selfRegister`は無効（エラー返却）
+- 従来の運用方式
+
+#### PUBLIC_REGISTRATION（自由登録）
+- ユーザーが`selfRegister`で自己登録可能
+- `inviteUser`も併用可能（管理者招待も継続）
+- `auto_approve_registration`設定で承認方法を制御
+  - `true`: OTP確認後、即座に登録完了
+  - `false`: 管理者承認待ちステータス（将来拡張）
 
 ### データ分離
 - 各アプリケーションのユーザー、認証情報、セッションは完全に分離
@@ -368,10 +427,21 @@ cargo lambda invoke --data-file test.json  # ローカルテスト
 - セッションタイムアウトと適切なJWT検証
 
 ### データ保護
-- DynamoDBの保存時暗号化
-- Lambda環境変数の暗号化
-- OTPハッシュ化保存
+
+#### DynamoDB暗号化設定
+- **保存時暗号化**: 段階的セキュリティレベル対応
+  - **標準**: AWS managed keys (`aws/dynamodb`) - 無料、開発・小規模本番向け
+  - **高セキュリティ**: Customer managed keys - 有料、エンタープライズ向け
+- **転送時暗号化**: TLS/HTTPS（DynamoDB・AWS SDK標準）
+- **環境別設定**: `ENCRYPTION_LEVEL` 環境変数で制御
+  - `standard`: AWS managed keys使用
+  - `enterprise`: Customer managed keys使用
+
+#### その他のデータ保護
+- Lambda環境変数の暗号化（KMS）
+- OTPハッシュ化保存（SHA-256 + ソルト）
 - セキュリティイベントのCloudWatchログ監視
+- JWT署名鍵の暗号化保存
 
 ### WebAuthn設定
 - Relying Party ID: 環境ごとに設定

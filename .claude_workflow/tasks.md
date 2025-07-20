@@ -67,6 +67,7 @@
   - AppConfigs テーブル作成関数
   - Users/Credentials/Sessions テーブルのapp_id対応
   - GSI設定とTTL設定
+  - DynamoDB暗号化設定（段階的セキュリティレベル対応）
 - [x] CRUD操作関数実装
   - create_user, get_user, update_user
   - create_credential, get_credentials_by_user
@@ -130,6 +131,32 @@
 - [ ] WebAuthn設定のアプリ毎カスタマイズ
 - [ ] エラーハンドリング統合
 
+### 2.1.5 ユーザー登録方式拡張（新機能）
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: 2.1 完了後  
+
+- [ ] `shared/src/types.rs` 拡張
+  - RegistrationMode enum追加（InviteOnly, PublicRegistration）
+  - AppConfig構造体拡張（registration_mode, auto_approve_registrationフィールド）
+- [ ] 権限チェックロジック基盤実装
+  - 登録方式チェック関数
+  - アプリ設定取得・キャッシュ機能拡張
+
+### 2.1.7 DynamoDB暗号化設定強化
+**Status**: 未着手  
+**Estimate**: 1.5時間  
+**Dependencies**: 2.1.5 完了後  
+
+- [ ] `shared/src/config.rs` 暗号化設定追加
+  - EncryptionLevel enum（Standard, Enterprise）
+  - 環境変数`ENCRYPTION_LEVEL`読み込み
+  - KMSキー設定管理
+- [ ] `shared/src/dynamodb.rs` 暗号化実装
+  - テーブル作成時の暗号化設定適用
+  - Customer managed keys対応
+  - 暗号化設定のバリデーション
+
 ### 2.2 OTP機能実装
 **Status**: 未着手  
 **Estimate**: 2時間  
@@ -186,6 +213,14 @@
 - [ ] JWT認証テスト
   - 生成・検証・期限切れテスト
   - アプリ別署名テスト
+- [ ] ユーザー登録方式テスト（新機能）
+  - RegistrationMode enum テスト
+  - AppConfig拡張フィールドテスト
+  - 権限チェックロジックテスト
+- [ ] DynamoDB暗号化テスト
+  - 暗号化設定バリデーションテスト
+  - AWS managed keys vs Customer managed keys テスト
+  - 環境変数設定テスト
 
 ### 2.6 Phase 2 完了・PR提出
 **Status**: 未着手  
@@ -233,6 +268,16 @@
 - [ ] カスタムスカラー定義（DateTime, JSON）
 - [ ] ページネーション型定義
 
+### 3.2.5 ユーザー登録スキーマ拡張（新機能）
+**Status**: 未着手  
+**Estimate**: 1時間  
+**Dependencies**: 3.2 完了後  
+
+- [ ] GraphQLスキーマ拡張
+  - RegistrationMode enum追加
+  - AppConfig型拡張（registration_mode, auto_approve_registrationフィールド）
+  - selfRegister mutation追加
+
 ### 3.3 リゾルバー基盤実装
 **Status**: 未着手  
 **Estimate**: 2時間  
@@ -248,12 +293,17 @@
 
 ### 3.4 認証フローリゾルバー
 **Status**: 未着手  
-**Estimate**: 6時間  
+**Estimate**: 7時間  
 **Dependencies**: 3.3 完了後  
 
 - [ ] `lambda/src/resolvers/mutation.rs` 新規作成
 - [ ] inviteUser ミューテーション
   - ユーザー招待フロー
+  - OTP生成とメール送信
+  - PendingUsersテーブル登録
+- [ ] selfRegister ミューテーション（新機能）
+  - 登録方式チェック（PUBLIC_REGISTRATION確認）
+  - ユーザー自由登録フロー
   - OTP生成とメール送信
   - PendingUsersテーブル登録
 - [ ] verifyOtpAndStartRegistration ミューテーション
@@ -312,7 +362,9 @@
 
 - [ ] GraphQLエンドツーエンドテスト
   - 全リゾルバーの動作確認
-  - 認証フロー統合テスト
+  - 認証フロー統合テスト（inviteUser + 完了フロー）
+  - 自由登録フロー統合テスト（selfRegister + 完了フロー）
+  - 登録方式制御テスト（INVITE_ONLY vs PUBLIC_REGISTRATION）
   - エラーハンドリングテスト
 - [ ] Lambda関数統合テスト
   - ローカル実行テスト
@@ -339,14 +391,19 @@
 
 ### 4.1 xtaskデプロイ機能
 **Status**: 未着手  
-**Estimate**: 4時間  
+**Estimate**: 5時間  
 **Dependencies**: Phase 3 完了後  
 
 - [ ] deployコマンド実装
   - cargo lambda build --release --arm64
   - Lambda関数作成/更新
-  - 環境変数設定
+  - 環境変数設定（暗号化設定含む）
   - IAMロールアタッチ
+- [ ] KMS暗号化設定自動化
+  - Customer managed keys作成（Enterpriseモード）
+  - キーポリシー設定
+  - Lambda環境変数KMS暗号化
+  - DynamoDBテーブル暗号化設定
 - [ ] API Gateway設定自動化
   - REST API作成
   - GraphQLエンドポイント設定
@@ -462,10 +519,13 @@
 
 ## タスク総計
 
-- **総タスク数**: 54タスク
-- **総作業時間**: 約70時間
+- **総タスク数**: 59タスク（ユーザー自由登録 + DynamoDB暗号化強化）
+- **総作業時間**: 約76.5時間
 - **完了タスク数**: 11タスク (Phase 1完了)
-- **残りタスク数**: 43タスク
+- **残りタスク数**: 48タスク
+- **新機能追加**: 
+  - ユーザー自由登録（+4時間）
+  - DynamoDB暗号化強化（+2.5時間）
 - **クリティカルパス**: Phase 1 ✅ → Phase 2 → Phase 3 → Phase 4
 - **Phase 1完了**: ✅ (PR提出済み)
 - **残り完了目標**: 2-3週間
@@ -498,12 +558,16 @@
 
 **Phase 1完了**: ✅ PR提出済み (`feature/passkey-foundation`)
 **現在のフェーズ**: Phase 1 PRレビュー待ち
-**次のアクション**: Phase 1 PRマージ後、Phase 2開始
+**新機能追加**: ✅ ユーザー自由登録機能をPhase 2-3に統合
+**セキュリティ強化**: ✅ DynamoDB段階的暗号化をPhase 2・4に統合
+**次のアクション**: Phase 1 PRマージ後、Phase 2開始（新機能・セキュリティ強化含む）
 
 ## 次のPhase開始条件
 
 **Phase 2開始**: Phase 1 PRがマージされ次第
 1. 新ブランチ `feature/phase2-core-features` 作成
 2. WebAuthn統合から開始
-3. 各タスク完了後、単体テスト実装
-4. Phase 2完了後、PR提出
+3. ユーザー登録方式拡張機能実装（2.1.5）
+4. DynamoDB暗号化設定強化（2.1.7）
+5. 各タスク完了後、単体テスト実装
+6. Phase 2完了後、PR提出
