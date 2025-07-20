@@ -136,6 +136,26 @@ xtask = "run --package xtask --"
 - `--skip-clippy` - clippyチェックをスキップ
 - `--skip-test` - テスト実行をスキップ
 
+### 依存関係の管理
+#### **必須：パッチバージョンまでの明示**
+- **Rustベストプラクティス**: 全ての依存関係でパッチバージョン（major.minor.patch）まで明示
+- ❌ 悪い例: `serde = "1.0"`, `tokio = "1"`
+- ✅ 良い例: `serde = "1.0.219"`, `tokio = "1.46.1"`
+- **理由**: 再現可能なビルドの保証、予期しない破壊的変更の回避
+
+#### cargo-editツールの使用
+- `cargo install cargo-edit` - cargo upgradeコマンドを利用可能に
+- `cargo upgrade` - 互換性のある依存関係を最新バージョンに自動更新
+- `cargo upgrade --incompatible --dry-run` - 非互換バージョンアップの確認
+- `cargo search <crate-name>` - 個別クレートの最新バージョン確認
+
+#### 更新手順とベストプラクティス
+1. `cargo upgrade` - パッチバージョンまで自動更新
+2. 必要に応じて手動でパッチバージョンを明示的に記載
+3. `cargo check` - コンパイルエラーがないことを確認
+4. `cargo xtask precommit` - 全チェックが通ることを確認
+5. 問題があれば元のバージョンに戻すか、コードを修正
+
 ### ドキュメント参照
 - [async-graphql](https://docs.rs/async-graphql)
 - [lambda_runtime](https://docs.rs/lambda_runtime)
