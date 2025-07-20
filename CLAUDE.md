@@ -94,6 +94,7 @@ xtask = "run --package xtask --"
 - `cargo xtask deploy` - Lambda関数、API Gateway設定デプロイ（aarch64）
 - `cargo xtask domain` - カスタムドメイン・TLS証明書設定
 - `cargo xtask test` - 統合テスト実行
+- `cargo xtask precommit` - プリコミットチェック（fmt、check、clippy、test）
 - `cargo xtask clean` - ビルド成果物クリーンアップ
 
 ## cargo lambdaコマンド
@@ -110,6 +111,30 @@ xtask = "run --package xtask --"
 - `thiserror`によるエラーハンドリング
 - `tokio`によるAsync/await
 - `serde`によるシリアライゼーション
+
+### コード品質管理
+#### **必須：コミット前のprecommitチェック**
+- **全てのコミット前に必ず`cargo xtask precommit`を実行**
+- 全てのエラーと警告を修正してからコミットすること
+- 以下のチェックが全て成功する必要あり：
+  - `cargo fmt --check` - コードフォーマット
+  - `cargo check` - コンパイルチェック
+  - `cargo clippy` - Lintチェック（警告をエラー扱い）
+  - `cargo test` - 全テスト実行
+
+#### Clippy警告の自動修正
+- `cargo clippy --fix --allow-dirty` - 自動修正可能な警告を修正
+- clippyが検出する一般的な問題：
+  - `uninlined_format_args` - format!内の変数直接使用
+  - `unwrap_or_default` - unwrap_or_else(Default::default)の簡略化
+  - `map_clone` - .map(|x| x.clone())を.cloned()に
+  - `derivable_impls` - 導出可能なDefaultトレイト実装
+- 自動修正後は必ず`cargo fmt`でフォーマット調整
+
+#### スキップオプション（緊急時のみ）
+- `--skip-fmt` - フォーマットチェックをスキップ
+- `--skip-clippy` - clippyチェックをスキップ
+- `--skip-test` - テスト実行をスキップ
 
 ### ドキュメント参照
 - [async-graphql](https://docs.rs/async-graphql)

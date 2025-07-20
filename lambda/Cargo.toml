@@ -14,7 +14,11 @@ shared = { path = "../shared" }
 # AWS and Lambda
 lambda_runtime = { workspace = true }
 aws-sdk-dynamodb = { workspace = true }
+aws-sdk-ses = { workspace = true }
 aws-config = { workspace = true }
+
+# GraphQL
+async-graphql = { workspace = true }
 
 # WebAuthn
 webauthn-rs = { workspace = true }
@@ -23,13 +27,20 @@ webauthn-rs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+# Authentication & Cryptography
+jsonwebtoken = { workspace = true }
+
 # Utilities
 uuid = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 time = { workspace = true }
+anyhow = { workspace = true }
 
-# HTTP and error handling
-anyhow = "1.0"
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# HTTP
 http = { workspace = true }
