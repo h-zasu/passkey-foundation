@@ -21,8 +21,8 @@
 
 ## Phase 1: 基盤実装 ✅ **完了** (Priority: HIGH)
 **ブランチ**: `feature/passkey-foundation`  
-**PR**: [Passkey認証基盤: 依存関係とコア基盤モジュール実装](https://github.com/h-zasu/passkey-foundation/pull/1)  
-**Status**: PRレビュー中
+**PR**: [Passkey認証基盤: Phase 1完了 + ユーザー自由登録・DynamoDB暗号化機能](https://github.com/h-zasu/passkey-foundation/pull/2)  
+**Status**: PRレビュー中（PR 1クローズのため新規作成）
 
 ### 1.1 Cargoワークスペース整理 ✅
 **Status**: 完了  
