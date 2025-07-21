@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::*;
 use scripty::*;
-use shared::{DynamoDbConfig, create_dynamodb_tables};
+use shared::{DynamoDbConfig, ServiceConfig, create_dynamodb_tables, EncryptionLevel};
 use std::path::Path;
 
 /// Passkey project automation tool
@@ -125,7 +125,20 @@ async fn init_command(region: &str, env: &str) -> Result<()> {
 
     println!("🏗️  Creating DynamoDB tables...");
     let db_config = DynamoDbConfig::new("passkey", env, region);
-    create_dynamodb_tables(&db_config).await?;
+    
+    // Create a basic service config for table creation
+    let service_config = ServiceConfig {
+        environment: env.to_string(),
+        table_prefix: "passkey".to_string(),
+        cors_origins: vec!["http://localhost:3000".to_string()],
+        default_jwt_expires_in: 3600,
+        default_session_timeout: 86400,
+        default_otp_expires_in: 1800,
+        encryption_level: EncryptionLevel::Standard,
+        kms_key_arn: None,
+    };
+    
+    create_dynamodb_tables(&db_config, &service_config).await?;
 
     println!("🔑 Creating IAM roles...");
     create_iam_roles(region, env).await?;

@@ -237,6 +237,18 @@ pub enum UserRole {
     SuperAdmin,
 }
 
+/// Registration mode enumeration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Default)]
+pub enum RegistrationMode {
+    /// Only administrators can invite users
+    #[default]
+    InviteOnly,
+    /// Users can register themselves
+    PublicRegistration,
+}
+
 impl std::fmt::Display for UserRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -256,6 +268,27 @@ impl std::str::FromStr for UserRole {
             "admin" => Ok(UserRole::Admin),
             "super_admin" => Ok(UserRole::SuperAdmin),
             _ => Err(format!("Invalid user role: {s}")),
+        }
+    }
+}
+
+impl std::fmt::Display for RegistrationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistrationMode::InviteOnly => write!(f, "invite_only"),
+            RegistrationMode::PublicRegistration => write!(f, "public_registration"),
+        }
+    }
+}
+
+impl std::str::FromStr for RegistrationMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "invite_only" => Ok(RegistrationMode::InviteOnly),
+            "public_registration" => Ok(RegistrationMode::PublicRegistration),
+            _ => Err(format!("Invalid registration mode: {s}")),
         }
     }
 }
@@ -359,6 +392,10 @@ pub struct AppConfig {
     pub is_active: bool,
     /// Admin email addresses
     pub admin_emails: Vec<String>,
+    /// Registration mode (invite-only or public registration)
+    pub registration_mode: RegistrationMode,
+    /// Auto-approve registration (true) or require admin approval (false)
+    pub auto_approve_registration: bool,
 }
 
 impl AppConfig {
@@ -375,6 +412,8 @@ impl AppConfig {
         session_timeout_seconds: u64,
         otp_expires_in: u64,
         admin_emails: Vec<String>,
+        registration_mode: RegistrationMode,
+        auto_approve_registration: bool,
     ) -> Self {
         let now = OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
@@ -394,6 +433,8 @@ impl AppConfig {
             updated_at: now,
             is_active: true,
             admin_emails,
+            registration_mode,
+            auto_approve_registration,
         }
     }
 
@@ -410,6 +451,8 @@ impl AppConfig {
             300,  // 5 minutes session
             1800, // 30 minutes OTP
             vec![format!("admin@{app_id}.localhost")],
+            RegistrationMode::PublicRegistration, // Default to public registration for dev
+            true, // Auto-approve for development
         )
     }
 
@@ -775,5 +818,100 @@ mod tests {
         assert!(!config.jwt_secret.is_empty());
         assert!(!config.created_at.is_empty());
         assert!(!config.updated_at.is_empty());
+        // Test new fields added for Phase 2
+        assert_eq!(config.registration_mode, RegistrationMode::PublicRegistration);
+        assert!(config.auto_approve_registration);
+    }
+
+    #[test]
+    fn test_registration_mode_display() {
+        assert_eq!(RegistrationMode::InviteOnly.to_string(), "invite_only");
+        assert_eq!(RegistrationMode::PublicRegistration.to_string(), "public_registration");
+    }
+
+    #[test]
+    fn test_registration_mode_from_str() {
+        assert_eq!("invite_only".parse::<RegistrationMode>().unwrap(), RegistrationMode::InviteOnly);
+        assert_eq!("public_registration".parse::<RegistrationMode>().unwrap(), RegistrationMode::PublicRegistration);
+        assert!("invalid_mode".parse::<RegistrationMode>().is_err());
+        assert!("".parse::<RegistrationMode>().is_err());
+    }
+
+    #[test]
+    fn test_registration_mode_default() {
+        assert_eq!(RegistrationMode::default(), RegistrationMode::InviteOnly);
+    }
+
+    #[test]
+    fn test_app_config_new_with_registration_mode() {
+        let config = AppConfig::new(
+            "test_app".to_string(),
+            "Test App".to_string(),
+            "example.com".to_string(),
+            "Test Application".to_string(),
+            vec!["https://example.com".to_string()],
+            "test_secret".to_string(),
+            7200,
+            600,
+            3600,
+            vec!["admin@example.com".to_string()],
+            RegistrationMode::InviteOnly,
+            false,
+        );
+
+        assert_eq!(config.app_id, "test_app");
+        assert_eq!(config.name, "Test App");
+        assert_eq!(config.registration_mode, RegistrationMode::InviteOnly);
+        assert!(!config.auto_approve_registration);
+    }
+
+    #[test]
+    fn test_app_config_registration_permissions() {
+        // Test InviteOnly mode
+        let invite_only_config = AppConfig {
+            registration_mode: RegistrationMode::InviteOnly,
+            auto_approve_registration: false,
+            ..AppConfig::default_dev("test".to_string())
+        };
+        assert_eq!(invite_only_config.registration_mode, RegistrationMode::InviteOnly);
+        assert!(!invite_only_config.auto_approve_registration);
+
+        // Test PublicRegistration mode with auto-approval
+        let public_config = AppConfig {
+            registration_mode: RegistrationMode::PublicRegistration,
+            auto_approve_registration: true,
+            ..AppConfig::default_dev("test".to_string())
+        };
+        assert_eq!(public_config.registration_mode, RegistrationMode::PublicRegistration);
+        assert!(public_config.auto_approve_registration);
+    }
+
+    #[test]
+    fn test_app_config_serialization() {
+        let config = AppConfig {
+            app_id: "test".to_string(),
+            name: "Test".to_string(),
+            relying_party_id: "test.com".to_string(),
+            relying_party_name: "Test".to_string(),
+            allowed_origins: vec!["https://test.com".to_string()],
+            jwt_secret: "secret".to_string(),
+            jwt_expires_in: 3600,
+            session_timeout_seconds: 300,
+            otp_expires_in: 1800,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            is_active: true,
+            admin_emails: vec!["admin@test.com".to_string()],
+            registration_mode: RegistrationMode::InviteOnly,
+            auto_approve_registration: false,
+        };
+
+        // Test that it can be serialized and deserialized
+        let serialized = serde_json::to_string(&config).unwrap();
+        let deserialized: AppConfig = serde_json::from_str(&serialized).unwrap();
+        
+        assert_eq!(config.app_id, deserialized.app_id);
+        assert_eq!(config.registration_mode, deserialized.registration_mode);
+        assert_eq!(config.auto_approve_registration, deserialized.auto_approve_registration);
     }
 }
