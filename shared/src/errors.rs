@@ -8,7 +8,7 @@
 use thiserror::Error;
 
 /// Main error type for the Passkey authentication system.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum PasskeyError {
     /// Authentication failed with a specific reason
     #[error("Authentication failed: {0}")]
@@ -43,12 +43,20 @@ pub enum PasskeyError {
     PendingUserNotFound,
 
     /// Invalid OTP provided
-    #[error("Invalid OTP")]
-    InvalidOTP,
+    #[error("Invalid OTP: {0}")]
+    InvalidOtp(String),
+
+    /// OTP has expired
+    #[error("OTP has expired")]
+    OtpExpired,
 
     /// OTP attempt limit exceeded
     #[error("OTP attempt limit exceeded")]
-    OTPAttemptsExceeded,
+    OtpMaxAttemptsExceeded,
+
+    /// System time error
+    #[error("System time error: {0}")]
+    SystemTime(String),
 
     /// WebAuthn operation failed
     #[error("WebAuthn error: {0}")]
@@ -68,7 +76,23 @@ pub enum PasskeyError {
 
     /// Configuration error
     #[error("Configuration error: {0}")]
+    Configuration(String),
+
+    /// Configuration error (alias)
+    #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    /// Invalid application ID
+    #[error("Invalid application ID: {0}")]
+    InvalidAppId(String),
+
+    /// Invalid user ID format
+    #[error("Invalid user ID: {0}")]
+    InvalidUserId(String),
+
+    /// Invalid credential
+    #[error("Invalid credential: {0}")]
+    InvalidCredential(String),
 
     /// Rate limiting error
     #[error("Rate limit exceeded")]
@@ -80,7 +104,7 @@ pub enum PasskeyError {
 }
 
 /// Database-specific errors.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum DatabaseError {
     /// Connection to database failed
     #[error("Database connection failed")]
@@ -108,7 +132,7 @@ pub enum DatabaseError {
 }
 
 /// Email service specific errors.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum EmailError {
     /// Failed to send email
     #[error("Failed to send email")]
@@ -171,6 +195,7 @@ impl PasskeyError {
             self,
             PasskeyError::Database(_)
                 | PasskeyError::EmailService(_)
+                | PasskeyError::Configuration(_)
                 | PasskeyError::ConfigError(_)
                 | PasskeyError::InternalError
         )
@@ -187,13 +212,19 @@ impl PasskeyError {
             PasskeyError::SessionNotFound => "SESSION_NOT_FOUND",
             PasskeyError::AppConfigNotFound => "APP_CONFIG_NOT_FOUND",
             PasskeyError::PendingUserNotFound => "PENDING_USER_NOT_FOUND",
-            PasskeyError::InvalidOTP => "INVALID_OTP",
-            PasskeyError::OTPAttemptsExceeded => "OTP_ATTEMPTS_EXCEEDED",
+            PasskeyError::InvalidOtp(_) => "INVALID_OTP",
+            PasskeyError::OtpExpired => "OTP_EXPIRED",
+            PasskeyError::OtpMaxAttemptsExceeded => "OTP_ATTEMPTS_EXCEEDED",
+            PasskeyError::SystemTime(_) => "SYSTEM_TIME_ERROR",
             PasskeyError::WebAuthn(_) => "WEBAUTHN_ERROR",
             PasskeyError::JWT(_) => "JWT_ERROR",
             PasskeyError::Database(_) => "DATABASE_ERROR",
             PasskeyError::EmailService(_) => "EMAIL_ERROR",
+            PasskeyError::Configuration(_) => "CONFIG_ERROR",
             PasskeyError::ConfigError(_) => "CONFIG_ERROR",
+            PasskeyError::InvalidAppId(_) => "INVALID_APP_ID",
+            PasskeyError::InvalidUserId(_) => "INVALID_USER_ID",
+            PasskeyError::InvalidCredential(_) => "INVALID_CREDENTIAL",
             PasskeyError::RateLimitExceeded => "RATE_LIMIT_EXCEEDED",
             PasskeyError::InternalError => "INTERNAL_ERROR",
         }
@@ -210,13 +241,19 @@ impl PasskeyError {
             PasskeyError::SessionNotFound => "Session not found or expired".to_string(),
             PasskeyError::AppConfigNotFound => "Application not found".to_string(),
             PasskeyError::PendingUserNotFound => "Invitation not found or expired".to_string(),
-            PasskeyError::InvalidOTP => "Invalid verification code".to_string(),
-            PasskeyError::OTPAttemptsExceeded => "Too many verification attempts".to_string(),
+            PasskeyError::InvalidOtp(_) => "Invalid verification code".to_string(),
+            PasskeyError::OtpExpired => "Verification code has expired".to_string(),
+            PasskeyError::OtpMaxAttemptsExceeded => "Too many verification attempts".to_string(),
+            PasskeyError::SystemTime(_) => "System time error".to_string(),
             PasskeyError::WebAuthn(_) => "WebAuthn operation failed".to_string(),
             PasskeyError::JWT(_) => "Token validation failed".to_string(),
             PasskeyError::Database(_) => "Service temporarily unavailable".to_string(),
             PasskeyError::EmailService(_) => "Email service temporarily unavailable".to_string(),
+            PasskeyError::Configuration(_) => "Service configuration error".to_string(),
             PasskeyError::ConfigError(_) => "Service configuration error".to_string(),
+            PasskeyError::InvalidAppId(_) => "Invalid application".to_string(),
+            PasskeyError::InvalidUserId(_) => "Invalid user".to_string(),
+            PasskeyError::InvalidCredential(_) => "Invalid credential".to_string(),
             PasskeyError::RateLimitExceeded => {
                 "Rate limit exceeded, please try again later".to_string()
             }
@@ -246,13 +283,11 @@ impl From<serde_json::Error> for DatabaseError {
 }
 
 // WebAuthn error conversion
-// Note: Exact error type path may vary based on webauthn-rs version
-// TODO: Update this when implementing WebAuthn integration
-// impl From<webauthn_rs::WebauthnError> for PasskeyError {
-//     fn from(err: webauthn_rs::WebauthnError) -> Self {
-//         PasskeyError::WebAuthn(format!("WebAuthn error: {:?}", err))
-//     }
-// }
+impl From<webauthn_rs::prelude::WebauthnError> for PasskeyError {
+    fn from(err: webauthn_rs::prelude::WebauthnError) -> Self {
+        PasskeyError::WebAuthn(format!("WebAuthn error: {:?}", err))
+    }
+}
 
 // JWT error conversion
 impl From<jsonwebtoken::errors::Error> for PasskeyError {
@@ -268,7 +303,7 @@ mod tests {
     #[test]
     fn test_error_codes() {
         assert_eq!(PasskeyError::UserNotFound.error_code(), "USER_NOT_FOUND");
-        assert_eq!(PasskeyError::InvalidOTP.error_code(), "INVALID_OTP");
+        assert_eq!(PasskeyError::InvalidOtp("test".to_string()).error_code(), "INVALID_OTP");
         assert_eq!(
             PasskeyError::RateLimitExceeded.error_code(),
             "RATE_LIMIT_EXCEEDED"
@@ -292,7 +327,7 @@ mod tests {
         assert!(PasskeyError::InternalError.should_log_details());
         assert!(PasskeyError::ConfigError("test".to_string()).should_log_details());
         assert!(!PasskeyError::UserNotFound.should_log_details());
-        assert!(!PasskeyError::InvalidOTP.should_log_details());
+        assert!(!PasskeyError::InvalidOtp("test".to_string()).should_log_details());
     }
 
     #[test]
@@ -350,10 +385,15 @@ mod tests {
             PasskeyError::PendingUserNotFound.error_code(),
             "PENDING_USER_NOT_FOUND"
         );
-        assert_eq!(PasskeyError::InvalidOTP.error_code(), "INVALID_OTP");
+        assert_eq!(PasskeyError::InvalidOtp("test".to_string()).error_code(), "INVALID_OTP");
+        assert_eq!(PasskeyError::OtpExpired.error_code(), "OTP_EXPIRED");
         assert_eq!(
-            PasskeyError::OTPAttemptsExceeded.error_code(),
+            PasskeyError::OtpMaxAttemptsExceeded.error_code(),
             "OTP_ATTEMPTS_EXCEEDED"
+        );
+        assert_eq!(
+            PasskeyError::SystemTime("test".to_string()).error_code(),
+            "SYSTEM_TIME_ERROR"
         );
         assert_eq!(
             PasskeyError::WebAuthn("test".to_string()).error_code(),
@@ -417,12 +457,20 @@ mod tests {
             "Invitation not found or expired"
         );
         assert_eq!(
-            PasskeyError::InvalidOTP.client_message(),
+            PasskeyError::InvalidOtp("test".to_string()).client_message(),
             "Invalid verification code"
         );
         assert_eq!(
-            PasskeyError::OTPAttemptsExceeded.client_message(),
+            PasskeyError::OtpExpired.client_message(),
+            "Verification code has expired"
+        );
+        assert_eq!(
+            PasskeyError::OtpMaxAttemptsExceeded.client_message(),
             "Too many verification attempts"
+        );
+        assert_eq!(
+            PasskeyError::SystemTime("test".to_string()).client_message(),
+            "System time error"
         );
         assert_eq!(
             PasskeyError::WebAuthn("details".to_string()).client_message(),
@@ -471,8 +519,10 @@ mod tests {
         assert!(!PasskeyError::SessionNotFound.should_log_details());
         assert!(!PasskeyError::AppConfigNotFound.should_log_details());
         assert!(!PasskeyError::PendingUserNotFound.should_log_details());
-        assert!(!PasskeyError::InvalidOTP.should_log_details());
-        assert!(!PasskeyError::OTPAttemptsExceeded.should_log_details());
+        assert!(!PasskeyError::InvalidOtp("test".to_string()).should_log_details());
+        assert!(!PasskeyError::OtpExpired.should_log_details());
+        assert!(!PasskeyError::OtpMaxAttemptsExceeded.should_log_details());
+        assert!(!PasskeyError::SystemTime("test".to_string()).should_log_details());
         assert!(!PasskeyError::WebAuthn("test".to_string()).should_log_details());
         assert!(!PasskeyError::JWT("test".to_string()).should_log_details());
         assert!(!PasskeyError::RateLimitExceeded.should_log_details());

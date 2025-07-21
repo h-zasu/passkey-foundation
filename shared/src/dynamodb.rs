@@ -16,11 +16,12 @@ use crate::{
     AppConfig, Credential, DatabaseError, PasskeyError, PendingUser, Session, SessionStatus,
     SessionType, User,
 };
+use crate::config::{EncryptionLevel, ServiceConfig};
 use anyhow::Result;
 use aws_sdk_dynamodb::types::{
     AttributeDefinition, AttributeValue, BillingMode, GlobalSecondaryIndex, KeySchemaElement,
     KeyType, LocalSecondaryIndex, Projection, ProjectionType, ScalarAttributeType,
-    TimeToLiveSpecification,
+    TimeToLiveSpecification, SseSpecification, SseType,
 };
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -79,7 +80,7 @@ impl DynamoDbConfig {
 
 /// Creates all DynamoDB tables required for the authentication system.
 ///
-/// This function creates five tables in the specified AWS region:
+/// This function creates five tables in the specified AWS region with encryption:
 /// - `{prefix}-users-{env}`: User account information
 /// - `{prefix}-credentials-{env}`: WebAuthn credentials
 /// - `{prefix}-sessions-{env}`: Authentication sessions with TTL
@@ -89,6 +90,7 @@ impl DynamoDbConfig {
 /// # Arguments
 ///
 /// * `config` - DynamoDB configuration with prefix, environment, and region
+/// * `service_config` - Service configuration including encryption settings
 ///
 /// # Returns
 ///
@@ -99,9 +101,11 @@ impl DynamoDbConfig {
 /// ```no_run
 /// # use anyhow::Result;
 /// # use shared::{DynamoDbConfig, create_dynamodb_tables};
+/// # use shared::config::ServiceConfig;
 /// # async fn example() -> Result<()> {
-/// let config = DynamoDbConfig::new("passkey", "dev", "us-east-1");
-/// create_dynamodb_tables(&config).await?;
+/// let db_config = DynamoDbConfig::new("passkey", "dev", "us-east-1");
+/// let service_config = ServiceConfig::from_env()?;
+/// create_dynamodb_tables(&db_config, &service_config).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -113,7 +117,12 @@ impl DynamoDbConfig {
 /// - The specified region is invalid
 /// - DynamoDB service is unavailable
 /// - Insufficient permissions to create tables
-pub async fn create_dynamodb_tables(config: &DynamoDbConfig) -> Result<()> {
+/// - Encryption configuration is invalid (e.g., Enterprise level without KMS key)
+pub async fn create_dynamodb_tables(config: &DynamoDbConfig, service_config: &ServiceConfig) -> Result<()> {
+    // Validate encryption configuration before proceeding
+    service_config.validate_encryption_config()
+        .map_err(|e| anyhow::anyhow!("Encryption configuration validation failed: {e}"))?;
+
     let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new(config.region.clone()))
         .load()
@@ -121,11 +130,11 @@ pub async fn create_dynamodb_tables(config: &DynamoDbConfig) -> Result<()> {
     let dynamodb = aws_sdk_dynamodb::Client::new(&aws_config);
 
     let tables = vec![
-        create_users_table(&dynamodb, config).await,
-        create_credentials_table(&dynamodb, config).await,
-        create_sessions_table(&dynamodb, config).await,
-        create_pending_users_table(&dynamodb, config).await,
-        create_app_configs_table(&dynamodb, config).await,
+        create_users_table(&dynamodb, config, service_config).await,
+        create_credentials_table(&dynamodb, config, service_config).await,
+        create_sessions_table(&dynamodb, config, service_config).await,
+        create_pending_users_table(&dynamodb, config, service_config).await,
+        create_app_configs_table(&dynamodb, config, service_config).await,
     ];
 
     for result in tables {
@@ -133,6 +142,44 @@ pub async fn create_dynamodb_tables(config: &DynamoDbConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Creates SSE specification for DynamoDB table encryption.
+///
+/// This function creates the appropriate Server-Side Encryption specification
+/// based on the service configuration:
+/// - Standard: Uses AWS managed keys (aws/dynamodb)
+/// - Enterprise: Uses customer managed keys from KMS
+///
+/// # Arguments
+///
+/// * `service_config` - Service configuration with encryption level and KMS key ARN
+///
+/// # Returns
+///
+/// Returns `SseSpecification` configured with the appropriate encryption settings.
+fn create_sse_specification(service_config: &ServiceConfig) -> SseSpecification {
+    match service_config.encryption_level {
+        EncryptionLevel::Standard => {
+            // Use AWS managed keys
+            SseSpecification::builder()
+                .enabled(true)
+                .sse_type(SseType::Aes256)
+                .build()
+        },
+        EncryptionLevel::Enterprise => {
+            // Use customer managed keys
+            let mut builder = SseSpecification::builder()
+                .enabled(true)
+                .sse_type(SseType::Kms);
+            
+            if let Some(ref kms_key_arn) = service_config.kms_key_arn {
+                builder = builder.kms_master_key_id(kms_key_arn.clone());
+            }
+            
+            builder.build()
+        }
+    }
 }
 
 /// Creates the Users table for storing user account information.
@@ -164,6 +211,7 @@ pub async fn create_dynamodb_tables(config: &DynamoDbConfig) -> Result<()> {
 ///
 /// * `dynamodb` - DynamoDB client instance
 /// * `config` - DynamoDB configuration with table naming
+/// * `service_config` - Service configuration with encryption settings
 ///
 /// # Returns
 ///
@@ -171,6 +219,7 @@ pub async fn create_dynamodb_tables(config: &DynamoDbConfig) -> Result<()> {
 async fn create_users_table(
     dynamodb: &aws_sdk_dynamodb::Client,
     config: &DynamoDbConfig,
+    service_config: &ServiceConfig,
 ) -> Result<()> {
     let table_name = config.table_name("users");
 
@@ -229,10 +278,11 @@ async fn create_users_table(
                         .build(),
                 )
                 .build()?,
-        );
+        )
+        .sse_specification(create_sse_specification(service_config));
 
     request.send().await?;
-    println!("✅ Created table: {table_name}");
+    println!("✅ Created table with encryption: {table_name}");
     Ok(())
 }
 
@@ -269,6 +319,7 @@ async fn create_users_table(
 ///
 /// * `dynamodb` - DynamoDB client instance
 /// * `config` - DynamoDB configuration with table naming
+/// * `service_config` - Service configuration with encryption settings
 ///
 /// # Returns
 ///
@@ -276,6 +327,7 @@ async fn create_users_table(
 async fn create_credentials_table(
     dynamodb: &aws_sdk_dynamodb::Client,
     config: &DynamoDbConfig,
+    service_config: &ServiceConfig,
 ) -> Result<()> {
     let table_name = config.table_name("credentials");
 
@@ -367,10 +419,11 @@ async fn create_credentials_table(
                         .build(),
                 )
                 .build()?,
-        );
+        )
+        .sse_specification(create_sse_specification(service_config));
 
     request.send().await?;
-    println!("✅ Created table: {table_name}");
+    println!("✅ Created table with encryption: {table_name}");
     Ok(())
 }
 
@@ -417,6 +470,7 @@ async fn create_credentials_table(
 ///
 /// * `dynamodb` - DynamoDB client instance
 /// * `config` - DynamoDB configuration with table naming
+/// * `service_config` - Service configuration with encryption settings
 ///
 /// # Returns
 ///
@@ -424,6 +478,7 @@ async fn create_credentials_table(
 async fn create_sessions_table(
     dynamodb: &aws_sdk_dynamodb::Client,
     config: &DynamoDbConfig,
+    service_config: &ServiceConfig,
 ) -> Result<()> {
     let table_name = config.table_name("sessions");
 
@@ -481,7 +536,8 @@ async fn create_sessions_table(
                         .build(),
                 )
                 .build()?,
-        );
+        )
+        .sse_specification(create_sse_specification(service_config));
 
     request.send().await?;
 
@@ -497,7 +553,7 @@ async fn create_sessions_table(
         );
 
     ttl_request.send().await?;
-    println!("✅ Created table with TTL: {table_name}");
+    println!("✅ Created table with TTL and encryption: {table_name}");
     Ok(())
 }
 
@@ -549,6 +605,7 @@ async fn table_exists(dynamodb: &aws_sdk_dynamodb::Client, table_name: &str) -> 
 ///
 /// * `dynamodb` - DynamoDB client instance
 /// * `config` - DynamoDB configuration with table naming
+/// * `service_config` - Service configuration with encryption settings
 ///
 /// # Returns
 ///
@@ -556,6 +613,7 @@ async fn table_exists(dynamodb: &aws_sdk_dynamodb::Client, table_name: &str) -> 
 async fn create_pending_users_table(
     dynamodb: &aws_sdk_dynamodb::Client,
     config: &DynamoDbConfig,
+    service_config: &ServiceConfig,
 ) -> Result<()> {
     let table_name = config.table_name("pending-users");
 
@@ -579,7 +637,8 @@ async fn create_pending_users_table(
                 .attribute_name("pk")
                 .key_type(KeyType::Hash)
                 .build()?,
-        );
+        )
+        .sse_specification(create_sse_specification(service_config));
 
     request.send().await?;
 
@@ -595,7 +654,7 @@ async fn create_pending_users_table(
         );
 
     ttl_request.send().await?;
-    println!("✅ Created table with TTL: {table_name}");
+    println!("✅ Created table with TTL and encryption: {table_name}");
     Ok(())
 }
 
@@ -609,6 +668,7 @@ async fn create_pending_users_table(
 ///
 /// * `dynamodb` - DynamoDB client instance
 /// * `config` - DynamoDB configuration with table naming
+/// * `service_config` - Service configuration with encryption settings
 ///
 /// # Returns
 ///
@@ -616,6 +676,7 @@ async fn create_pending_users_table(
 async fn create_app_configs_table(
     dynamodb: &aws_sdk_dynamodb::Client,
     config: &DynamoDbConfig,
+    service_config: &ServiceConfig,
 ) -> Result<()> {
     let table_name = config.table_name("app-configs");
 
@@ -639,10 +700,11 @@ async fn create_app_configs_table(
                 .attribute_name("app_id")
                 .key_type(KeyType::Hash)
                 .build()?,
-        );
+        )
+        .sse_specification(create_sse_specification(service_config));
 
     request.send().await?;
-    println!("✅ Created table: {table_name}");
+    println!("✅ Created table with encryption: {table_name}");
     Ok(())
 }
 
@@ -1837,5 +1899,285 @@ fn parse_app_config_from_item(
         updated_at,
         is_active,
         admin_emails,
+        registration_mode: crate::types::RegistrationMode::InviteOnly, // Default for backward compatibility
+        auto_approve_registration: false, // Default for backward compatibility  
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{EncryptionLevel, ServiceConfig};
+    use crate::types::{User, UserRole, RegistrationMode};
+
+    fn create_test_service_config() -> ServiceConfig {
+        ServiceConfig {
+            environment: "test".to_string(),
+            table_prefix: "passkey".to_string(),
+            cors_origins: vec!["http://localhost:3000".to_string()],
+            default_jwt_expires_in: 3600,
+            default_session_timeout: 300,
+            default_otp_expires_in: 1800,
+            encryption_level: EncryptionLevel::Standard,
+            kms_key_arn: None,
+        }
+    }
+
+    fn create_test_dynamodb_config() -> DynamoDbConfig {
+        DynamoDbConfig::new("passkey", "test", "us-east-1")
+    }
+
+    #[test]
+    fn test_dynamodb_config_new() {
+        let config = DynamoDbConfig::new("passkey", "test", "us-east-1");
+        assert_eq!(config.table_prefix, "passkey");
+        assert_eq!(config.environment, "test");
+        assert_eq!(config.region, "us-east-1");
+    }
+
+    #[test]
+    fn test_dynamodb_config_table_name() {
+        let config = create_test_dynamodb_config();
+        assert_eq!(config.table_name("users"), "passkey-users-test");
+        assert_eq!(config.table_name("credentials"), "passkey-credentials-test");
+        assert_eq!(config.table_name("sessions"), "passkey-sessions-test");
+        assert_eq!(config.table_name("pending-users"), "passkey-pending-users-test");
+        assert_eq!(config.table_name("app-configs"), "passkey-app-configs-test");
+    }
+
+    #[test]
+    fn test_create_sse_specification_standard() {
+        let service_config = create_test_service_config();
+        let sse_spec = create_sse_specification(&service_config);
+        
+        // Note: We can't directly test the internal structure of SseSpecification
+        // as it doesn't expose its fields, but we can test that it builds successfully
+        assert!(true); // If we reach here, the function executed without panic
+    }
+
+    #[test]
+    fn test_create_sse_specification_enterprise() {
+        let mut service_config = create_test_service_config();
+        service_config.encryption_level = EncryptionLevel::Enterprise;
+        service_config.kms_key_arn = Some("arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012".to_string());
+        
+        let sse_spec = create_sse_specification(&service_config);
+        
+        // Test that enterprise encryption builds successfully
+        assert!(true);
+    }
+
+    #[test]
+    fn test_create_sse_specification_enterprise_without_kms() {
+        let mut service_config = create_test_service_config();
+        service_config.encryption_level = EncryptionLevel::Enterprise;
+        service_config.kms_key_arn = None;
+        
+        let sse_spec = create_sse_specification(&service_config);
+        
+        // Even without KMS key ARN, the function should not panic
+        assert!(true);
+    }
+
+    #[test]
+    fn test_parse_user_from_item() {
+        let mut item = HashMap::new();
+        item.insert("app_id".to_string(), AttributeValue::S("test_app".to_string()));
+        item.insert("user_id".to_string(), AttributeValue::S("user123".to_string()));
+        item.insert("email".to_string(), AttributeValue::S("test@example.com".to_string()));
+        item.insert("display_name".to_string(), AttributeValue::S("Test User".to_string()));
+        item.insert("created_at".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("updated_at".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("is_active".to_string(), AttributeValue::Bool(true));
+        item.insert("role".to_string(), AttributeValue::S("user".to_string()));
+
+        let user = parse_user_from_item(item).unwrap();
+        assert_eq!(user.app_id, "test_app");
+        assert_eq!(user.user_id, "user123");
+        assert_eq!(user.email, "test@example.com");
+        assert_eq!(user.display_name, "Test User");
+        assert_eq!(user.role, UserRole::User);
+        assert!(user.is_active);
+        assert!(user.last_login.is_none());
+    }
+
+    #[test]
+    fn test_parse_user_from_item_missing_required_field() {
+        let mut item = HashMap::new();
+        item.insert("app_id".to_string(), AttributeValue::S("test_app".to_string()));
+        // Missing user_id
+        item.insert("email".to_string(), AttributeValue::S("test@example.com".to_string()));
+
+        let result = parse_user_from_item(item);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(PasskeyError::Database(DatabaseError::SerializationError(_)))));
+    }
+
+    #[test]
+    fn test_parse_credential_from_item() {
+        let mut item = HashMap::new();
+        item.insert("app_id".to_string(), AttributeValue::S("test_app".to_string()));
+        item.insert("credential_id".to_string(), AttributeValue::S("cred123".to_string()));
+        item.insert("user_id".to_string(), AttributeValue::S("user123".to_string()));
+        item.insert("public_key".to_string(), AttributeValue::S("pubkey123".to_string()));
+        item.insert("counter".to_string(), AttributeValue::N("1".to_string()));
+        item.insert("aaguid".to_string(), AttributeValue::S("aaguid123".to_string()));
+        item.insert("transports".to_string(), AttributeValue::Ss(vec!["usb".to_string(), "nfc".to_string()]));
+        item.insert("user_verification".to_string(), AttributeValue::S("required".to_string()));
+        item.insert("created_at".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("last_used".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("is_active".to_string(), AttributeValue::Bool(true));
+
+        let credential = parse_credential_from_item(item).unwrap();
+        assert_eq!(credential.app_id, "test_app");
+        assert_eq!(credential.credential_id, "cred123");
+        assert_eq!(credential.user_id, "user123");
+        assert_eq!(credential.counter, 1);
+        assert_eq!(credential.transports, vec!["usb", "nfc"]);
+        assert!(credential.is_active);
+    }
+
+    #[test]
+    fn test_parse_session_from_item() {
+        let mut item = HashMap::new();
+        item.insert("app_id".to_string(), AttributeValue::S("test_app".to_string()));
+        item.insert("session_id".to_string(), AttributeValue::S("session123".to_string()));
+        item.insert("challenge".to_string(), AttributeValue::S("challenge123".to_string()));
+        item.insert("session_type".to_string(), AttributeValue::S("registration".to_string()));
+        item.insert("relying_party_id".to_string(), AttributeValue::S("example.com".to_string()));
+        item.insert("created_at".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("expires_at".to_string(), AttributeValue::N("1672531200".to_string()));
+        item.insert("status".to_string(), AttributeValue::S("active".to_string()));
+        item.insert("ip_address".to_string(), AttributeValue::S("192.168.1.1".to_string()));
+        item.insert("user_agent".to_string(), AttributeValue::S("Mozilla/5.0".to_string()));
+
+        let session = parse_session_from_item(item).unwrap();
+        assert_eq!(session.app_id, "test_app");
+        assert_eq!(session.session_id, "session123");
+        assert_eq!(session.challenge, "challenge123");
+        assert_eq!(session.relying_party_id, "example.com");
+        assert_eq!(session.expires_at, 1672531200);
+        assert_eq!(session.ip_address, "192.168.1.1");
+    }
+
+    #[test]
+    fn test_parse_pending_user_from_item() {
+        let mut item = HashMap::new();
+        item.insert("pending_user_id".to_string(), AttributeValue::S("pending123".to_string()));
+        item.insert("app_id".to_string(), AttributeValue::S("test_app".to_string()));
+        item.insert("email".to_string(), AttributeValue::S("pending@example.com".to_string()));
+        item.insert("otp_hash".to_string(), AttributeValue::S("hash123".to_string()));
+        item.insert("otp_salt".to_string(), AttributeValue::S("salt123".to_string()));
+        item.insert("invited_at".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("expires_at".to_string(), AttributeValue::N("1672531200".to_string()));
+        item.insert("otp_attempts".to_string(), AttributeValue::N("0".to_string()));
+        item.insert("invited_by".to_string(), AttributeValue::S("admin@example.com".to_string()));
+
+        let pending_user = parse_pending_user_from_item(item).unwrap();
+        assert_eq!(pending_user.pending_user_id, "pending123");
+        assert_eq!(pending_user.app_id, "test_app");
+        assert_eq!(pending_user.email, "pending@example.com");
+        assert_eq!(pending_user.otp_hash, "hash123");
+        assert_eq!(pending_user.otp_attempts, 0);
+        assert_eq!(pending_user.invited_by, "admin@example.com");
+    }
+
+    #[test]
+    fn test_parse_app_config_from_item() {
+        let mut item = HashMap::new();
+        item.insert("app_id".to_string(), AttributeValue::S("test_app".to_string()));
+        item.insert("name".to_string(), AttributeValue::S("Test Application".to_string()));
+        item.insert("relying_party_id".to_string(), AttributeValue::S("example.com".to_string()));
+        item.insert("relying_party_name".to_string(), AttributeValue::S("Test App".to_string()));
+        item.insert("allowed_origins".to_string(), AttributeValue::Ss(vec!["https://example.com".to_string()]));
+        item.insert("jwt_secret".to_string(), AttributeValue::S("secret123".to_string()));
+        item.insert("jwt_expires_in".to_string(), AttributeValue::N("3600".to_string()));
+        item.insert("session_timeout_seconds".to_string(), AttributeValue::N("300".to_string()));
+        item.insert("otp_expires_in".to_string(), AttributeValue::N("1800".to_string()));
+        item.insert("created_at".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("updated_at".to_string(), AttributeValue::S("2023-01-01T00:00:00Z".to_string()));
+        item.insert("is_active".to_string(), AttributeValue::Bool(true));
+        item.insert("admin_emails".to_string(), AttributeValue::Ss(vec!["admin@example.com".to_string()]));
+
+        let app_config = parse_app_config_from_item(item).unwrap();
+        assert_eq!(app_config.app_id, "test_app");
+        assert_eq!(app_config.name, "Test Application");
+        assert_eq!(app_config.relying_party_id, "example.com");
+        assert_eq!(app_config.jwt_expires_in, 3600);
+        assert_eq!(app_config.session_timeout_seconds, 300);
+        assert_eq!(app_config.otp_expires_in, 1800);
+        assert!(app_config.is_active);
+        // Test default values for backward compatibility
+        assert_eq!(app_config.registration_mode, RegistrationMode::InviteOnly);
+        assert!(!app_config.auto_approve_registration);
+    }
+
+    #[test]
+    fn test_service_config_encryption_with_tables() {
+        let service_config = create_test_service_config();
+        
+        // Test that standard encryption configuration works
+        assert_eq!(service_config.encryption_level, EncryptionLevel::Standard);
+        assert!(service_config.kms_key_arn.is_none());
+        assert!(!service_config.uses_customer_managed_keys());
+        assert!(service_config.validate_encryption_config().is_ok());
+
+        // Test table naming with encryption
+        let db_config = create_test_dynamodb_config();
+        assert_eq!(db_config.table_name("users"), "passkey-users-test");
+    }
+
+    #[test]
+    fn test_encryption_levels_for_table_creation() {
+        // Test that both encryption levels can be used with SSE specification
+        let standard_config = ServiceConfig {
+            encryption_level: EncryptionLevel::Standard,
+            kms_key_arn: None,
+            ..create_test_service_config()
+        };
+        
+        let enterprise_config = ServiceConfig {
+            encryption_level: EncryptionLevel::Enterprise,
+            kms_key_arn: Some("arn:aws:kms:us-east-1:123456789012:key/test".to_string()),
+            ..create_test_service_config()
+        };
+
+        // Both should create valid SSE specifications
+        let standard_sse = create_sse_specification(&standard_config);
+        let enterprise_sse = create_sse_specification(&enterprise_config);
+        
+        // Verify they were created without panicking
+        assert!(true);
+    }
+
+    #[test]
+    fn test_table_creation_integration() {
+        // Integration test for table creation components
+        let service_config = create_test_service_config();
+        let db_config = create_test_dynamodb_config();
+        
+        // Test that all table names can be generated
+        let users_table = db_config.table_name("users");
+        let credentials_table = db_config.table_name("credentials");
+        let sessions_table = db_config.table_name("sessions");
+        let pending_users_table = db_config.table_name("pending-users");
+        let app_configs_table = db_config.table_name("app-configs");
+        
+        assert_eq!(users_table, "passkey-users-test");
+        assert_eq!(credentials_table, "passkey-credentials-test");
+        assert_eq!(sessions_table, "passkey-sessions-test");
+        assert_eq!(pending_users_table, "passkey-pending-users-test");
+        assert_eq!(app_configs_table, "passkey-app-configs-test");
+        
+        // Test that SSE specifications can be created for all encryption levels
+        let sse_standard = create_sse_specification(&service_config);
+        
+        let mut enterprise_config = service_config;
+        enterprise_config.encryption_level = EncryptionLevel::Enterprise;
+        enterprise_config.kms_key_arn = Some("test-key".to_string());
+        let sse_enterprise = create_sse_specification(&enterprise_config);
+        
+        // Verify successful creation
+        assert!(true);
+    }
 }

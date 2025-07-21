@@ -7,6 +7,44 @@
 use crate::{AppConfig, PasskeyError};
 use std::collections::HashMap;
 use std::env;
+use std::fmt;
+use std::str::FromStr;
+
+/// DynamoDB encryption levels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EncryptionLevel {
+    /// Standard encryption with AWS managed keys
+    Standard,
+    /// Enterprise encryption with customer managed keys
+    Enterprise,
+}
+
+impl fmt::Display for EncryptionLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EncryptionLevel::Standard => write!(f, "standard"),
+            EncryptionLevel::Enterprise => write!(f, "enterprise"),
+        }
+    }
+}
+
+impl FromStr for EncryptionLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "standard" => Ok(EncryptionLevel::Standard),
+            "enterprise" => Ok(EncryptionLevel::Enterprise),
+            _ => Err(format!("Invalid encryption level: {}. Must be 'standard' or 'enterprise'", s)),
+        }
+    }
+}
+
+impl Default for EncryptionLevel {
+    fn default() -> Self {
+        EncryptionLevel::Standard
+    }
+}
 
 /// Global service configuration.
 #[derive(Debug, Clone)]
@@ -23,11 +61,30 @@ pub struct ServiceConfig {
     pub default_session_timeout: u64,
     /// Default OTP expiration (seconds)
     pub default_otp_expires_in: u64,
+    /// DynamoDB encryption level
+    pub encryption_level: EncryptionLevel,
+    /// KMS key ARN for Enterprise encryption (optional)
+    pub kms_key_arn: Option<String>,
 }
 
 impl ServiceConfig {
     /// Loads configuration from environment variables.
     pub fn from_env() -> Result<Self, PasskeyError> {
+        let encryption_level = env::var("ENCRYPTION_LEVEL")
+            .unwrap_or_else(|_| "standard".to_string())
+            .parse()
+            .map_err(|e: String| PasskeyError::ConfigError(e))?;
+        
+        let kms_key_arn = env::var("KMS_KEY_ARN").ok()
+            .filter(|s| !s.trim().is_empty());
+
+        // Validate KMS key ARN if encryption level is Enterprise
+        if matches!(encryption_level, EncryptionLevel::Enterprise) && kms_key_arn.is_none() {
+            return Err(PasskeyError::ConfigError(
+                "KMS_KEY_ARN is required when ENCRYPTION_LEVEL is 'enterprise'".to_string()
+            ));
+        }
+
         Ok(Self {
             environment: env::var("ENVIRONMENT").unwrap_or_else(|_| "dev".to_string()),
             table_prefix: env::var("TABLE_PREFIX").unwrap_or_else(|_| "passkey".to_string()),
@@ -40,7 +97,7 @@ impl ServiceConfig {
                 .unwrap_or_else(|_| "3600".to_string())
                 .parse()
                 .map_err(|_| {
-                    PasskeyError::ConfigError("Invalid DEFAULT_JWT_EXPIRES_IN".to_string())
+                    PasskeyError::Configuration("Invalid DEFAULT_JWT_EXPIRES_IN".to_string())
                 })?,
             default_session_timeout: env::var("DEFAULT_SESSION_TIMEOUT")
                 .unwrap_or_else(|_| "300".to_string())
@@ -54,12 +111,29 @@ impl ServiceConfig {
                 .map_err(|_| {
                     PasskeyError::ConfigError("Invalid DEFAULT_OTP_EXPIRES_IN".to_string())
                 })?,
+            encryption_level,
+            kms_key_arn,
         })
     }
 
     /// Gets the full table name for a given table type.
     pub fn table_name(&self, table_type: &str) -> String {
         format!("{}-{}-{}", self.table_prefix, table_type, self.environment)
+    }
+
+    /// Validates encryption configuration.
+    pub fn validate_encryption_config(&self) -> Result<(), PasskeyError> {
+        if matches!(self.encryption_level, EncryptionLevel::Enterprise) && self.kms_key_arn.is_none() {
+            return Err(PasskeyError::ConfigError(
+                "KMS key ARN is required for Enterprise encryption level".to_string()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns true if customer managed keys should be used for encryption.
+    pub fn uses_customer_managed_keys(&self) -> bool {
+        matches!(self.encryption_level, EncryptionLevel::Enterprise)
     }
 }
 
@@ -77,6 +151,26 @@ pub struct AwsConfig {
 impl AwsConfig {
     /// Creates a new AWS configuration with initialized clients using AWS standard configuration resolution.
     pub async fn new() -> Result<Self, PasskeyError> {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .load()
+            .await;
+
+        let dynamodb = aws_sdk_dynamodb::Client::new(&config);
+        let ses = aws_sdk_ses::Client::new(&config);
+
+        Ok(Self {
+            dynamodb,
+            ses,
+            config,
+        })
+    }
+
+    /// Creates a test AWS configuration for local development and testing.
+    /// This method attempts to create AWS clients but falls back gracefully if AWS is not configured.
+    #[cfg(test)]
+    pub async fn local_test() -> Result<Self, PasskeyError> {
+        // For local tests, we'll create a basic config that may or may not work
+        // depending on whether AWS credentials are available
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .load()
             .await;
@@ -217,6 +311,8 @@ mod tests {
             default_jwt_expires_in: 3600,
             default_session_timeout: 300,
             default_otp_expires_in: 1800,
+            encryption_level: EncryptionLevel::Standard,
+            kms_key_arn: None,
         };
 
         assert_eq!(config.table_name("users"), "passkey-users-test");
@@ -312,6 +408,8 @@ mod tests {
             default_jwt_expires_in: 7200,
             default_session_timeout: 600,
             default_otp_expires_in: 3600,
+            encryption_level: EncryptionLevel::Standard,
+            kms_key_arn: None,
         };
 
         assert_eq!(config.table_name("users"), "custom-users-test");
@@ -335,6 +433,8 @@ mod tests {
             default_jwt_expires_in: 3600,
             default_session_timeout: 300,
             default_otp_expires_in: 1800,
+            encryption_level: EncryptionLevel::Standard,
+            kms_key_arn: None,
         };
 
         assert_eq!(config.cors_origins.len(), 2);
@@ -348,5 +448,64 @@ mod tests {
                 .cors_origins
                 .contains(&"https://app2.com".to_string())
         );
+    }
+
+    #[test]
+    fn test_encryption_level_display() {
+        assert_eq!(EncryptionLevel::Standard.to_string(), "standard");
+        assert_eq!(EncryptionLevel::Enterprise.to_string(), "enterprise");
+    }
+
+    #[test]
+    fn test_encryption_level_from_str() {
+        assert_eq!("standard".parse::<EncryptionLevel>().unwrap(), EncryptionLevel::Standard);
+        assert_eq!("enterprise".parse::<EncryptionLevel>().unwrap(), EncryptionLevel::Enterprise);
+        assert_eq!("STANDARD".parse::<EncryptionLevel>().unwrap(), EncryptionLevel::Standard);
+        assert_eq!("ENTERPRISE".parse::<EncryptionLevel>().unwrap(), EncryptionLevel::Enterprise);
+        
+        assert!("invalid".parse::<EncryptionLevel>().is_err());
+    }
+
+    #[test]
+    fn test_encryption_level_default() {
+        assert_eq!(EncryptionLevel::default(), EncryptionLevel::Standard);
+    }
+
+    #[test]
+    fn test_service_config_encryption_validation() {
+        // Standard encryption should always be valid
+        let standard_config = ServiceConfig {
+            environment: "test".to_string(),
+            table_prefix: "passkey".to_string(),
+            cors_origins: vec!["http://localhost:3000".to_string()],
+            default_jwt_expires_in: 3600,
+            default_session_timeout: 300,
+            default_otp_expires_in: 1800,
+            encryption_level: EncryptionLevel::Standard,
+            kms_key_arn: None,
+        };
+        
+        assert!(standard_config.validate_encryption_config().is_ok());
+        assert!(!standard_config.uses_customer_managed_keys());
+
+        // Enterprise encryption without KMS key should fail
+        let enterprise_no_key_config = ServiceConfig {
+            encryption_level: EncryptionLevel::Enterprise,
+            kms_key_arn: None,
+            ..standard_config.clone()
+        };
+        
+        assert!(enterprise_no_key_config.validate_encryption_config().is_err());
+        assert!(enterprise_no_key_config.uses_customer_managed_keys());
+
+        // Enterprise encryption with KMS key should succeed
+        let enterprise_with_key_config = ServiceConfig {
+            encryption_level: EncryptionLevel::Enterprise,
+            kms_key_arn: Some("arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012".to_string()),
+            ..standard_config
+        };
+        
+        assert!(enterprise_with_key_config.validate_encryption_config().is_ok());
+        assert!(enterprise_with_key_config.uses_customer_managed_keys());
     }
 }
