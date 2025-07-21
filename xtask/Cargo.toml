@@ -22,6 +22,8 @@ aws-sdk-dynamodb = { workspace = true }
 aws-sdk-apigateway = { workspace = true }
 aws-sdk-lambda = { workspace = true }
 aws-sdk-iam = { workspace = true }
+aws-sdk-sts = { workspace = true }
+aws-config = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
@@ -33,9 +35,7 @@ serde_json = { workspace = true }
 # Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
+anyhow = { workspace = true }
 
 # Additional dependencies for xtask
-anyhow = "1.0"
 colored = "3.0.0"
-aws-config = "1.8.2"
-aws-sdk-sts = "1.78.0"

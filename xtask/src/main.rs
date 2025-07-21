@@ -19,7 +19,7 @@ enum Command {
     /// Initialize AWS resources and development environment
     Init {
         /// AWS region to deploy to
-        #[arg(short, long, default_value = "us-west-2")]
+        #[arg(short, long, default_value = "us-east-1")]
         region: String,
         /// Environment name (dev, staging, prod)
         #[arg(short, long, default_value = "dev")]
@@ -28,7 +28,7 @@ enum Command {
     /// Build and deploy Lambda functions
     Deploy {
         /// AWS region to deploy to
-        #[arg(short, long, default_value = "us-west-2")]
+        #[arg(short, long, default_value = "us-east-1")]
         region: String,
         /// Environment name (dev, staging, prod)
         #[arg(short, long, default_value = "dev")]
@@ -54,6 +54,18 @@ enum Command {
         /// Environment to clean
         #[arg(short, long, default_value = "dev")]
         env: String,
+    },
+    /// Run pre-commit checks (fmt, check, clippy, test)
+    Precommit {
+        /// Skip cargo fmt
+        #[arg(long)]
+        skip_fmt: bool,
+        /// Skip cargo clippy
+        #[arg(long)]
+        skip_clippy: bool,
+        /// Skip cargo test
+        #[arg(long)]
+        skip_test: bool,
     },
 }
 
@@ -89,6 +101,14 @@ async fn main() -> Result<()> {
         Command::Clean { aws_resources, env } => {
             println!("{}", "🧹 Cleaning up...".red().bold());
             clean_command(aws_resources, &env).await?;
+        }
+        Command::Precommit {
+            skip_fmt,
+            skip_clippy,
+            skip_test,
+        } => {
+            println!("{}", "🔍 Running pre-commit checks...".magenta().bold());
+            precommit_command(skip_fmt, skip_clippy, skip_test)?;
         }
     }
 
@@ -132,11 +152,7 @@ async fn deploy_command(region: &str, env: &str, function: Option<&str>) -> Resu
 
     let functions = match function {
         Some(f) => vec![f.to_string()],
-        None => vec![
-            "authorizer".to_string(),
-            "register".to_string(),
-            "authenticate".to_string(),
-        ],
+        None => vec!["lambda".to_string()],
     };
 
     for func in &functions {
@@ -188,12 +204,10 @@ async fn clean_command(aws_resources: bool, env: &str) -> Result<()> {
         .context("Failed to clean cargo artifacts")?;
 
     // Clean lambda build artifacts
-    for func in &["authorizer", "register", "authenticate"] {
-        let target_dir = format!("lambdas/{func}/target");
-        if Path::new(&target_dir).exists() {
-            std::fs::remove_dir_all(&target_dir)
-                .with_context(|| format!("Failed to remove {target_dir}"))?;
-        }
+    let target_dir = "lambda/target";
+    if Path::new(target_dir).exists() {
+        std::fs::remove_dir_all(target_dir)
+            .with_context(|| format!("Failed to remove {target_dir}"))?;
     }
 
     // Clean temporary files
@@ -278,9 +292,70 @@ fn check_required_tools() -> Result<()> {
     Ok(())
 }
 
-async fn create_iam_roles(_region: &str, env: &str) -> Result<()> {
-    // TODO: Implement IAM role creation
-    println!("⚠️  IAM role creation not yet implemented for env: {env}");
+async fn create_iam_roles(region: &str, env: &str) -> Result<()> {
+    println!("🔑 Creating IAM roles for environment: {env}");
+
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new(region.to_string()))
+        .load()
+        .await;
+
+    let iam_client = aws_sdk_iam::Client::new(&config);
+
+    // Check if Lambda execution role already exists
+    let role_name = format!("passkey-lambda-role-{env}");
+
+    match iam_client.get_role().role_name(&role_name).send().await {
+        Ok(_) => {
+            println!("✅ IAM role {role_name} already exists");
+        }
+        Err(_) => {
+            // Create the role
+            let trust_policy = r#"{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}"#;
+
+            iam_client
+                .create_role()
+                .role_name(&role_name)
+                .assume_role_policy_document(trust_policy)
+                .description(format!(
+                    "Lambda execution role for Passkey service in {env} environment"
+                ))
+                .send()
+                .await
+                .with_context(|| format!("Failed to create IAM role {role_name}"))?;
+
+            // Attach necessary policies
+            let policies = vec![
+                "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+                "arn:aws:iam::aws:policy/AmazonSESFullAccess",
+            ];
+
+            for policy_arn in policies {
+                iam_client
+                    .attach_role_policy()
+                    .role_name(&role_name)
+                    .policy_arn(policy_arn)
+                    .send()
+                    .await
+                    .with_context(|| format!("Failed to attach policy {policy_arn}"))?;
+            }
+
+            println!("✅ Created IAM role: {role_name}");
+        }
+    }
+
     Ok(())
 }
 
@@ -297,6 +372,8 @@ TABLE_PREFIX=passkey
 USERS_TABLE={}
 CREDENTIALS_TABLE={}
 SESSIONS_TABLE={}
+PENDING_USERS_TABLE={}
+APP_CONFIGS_TABLE={}
 
 # WebAuthn Configuration
 RELYING_PARTY_ID=localhost:3000
@@ -313,7 +390,9 @@ LAMBDA_MEMORY=256
 "#,
         db_config.table_name("users"),
         db_config.table_name("credentials"),
-        db_config.table_name("sessions")
+        db_config.table_name("sessions"),
+        db_config.table_name("pending-users"),
+        db_config.table_name("app-configs")
     );
 
     let config_file = format!(".env.{env}");
@@ -325,46 +404,285 @@ LAMBDA_MEMORY=256
 }
 
 fn build_lambda_function(function: &str) -> Result<()> {
-    let function_dir = format!("lambdas/{function}");
-
-    cmd!("cargo", "lambda", "build", "--release", "--arm64")
-        .current_dir(&function_dir)
-        .run()
-        .with_context(|| format!("Failed to build {function}"))?;
+    if function == "lambda" {
+        cmd!("cargo", "lambda", "build", "--release", "--arm64")
+            .current_dir(function)
+            .run()
+            .with_context(|| format!("Failed to build {function}"))?;
+    } else {
+        anyhow::bail!("Unknown function: {function}. Available: lambda");
+    }
 
     Ok(())
 }
 
 async fn deploy_lambda_function(function: &str, region: &str, env: &str) -> Result<()> {
     let function_name = format!("passkey-{function}-{env}");
-    let function_dir = format!("lambdas/{function}");
 
-    // TODO: Implement proper IAM role ARN
-    let iam_role = format!("arn:aws:iam::123456789012:role/passkey-lambda-role-{env}");
+    if function == "lambda" {
+        // Check if IAM role exists, create if needed
+        let iam_role = ensure_lambda_role(region, env).await?;
 
-    cmd!("cargo", "lambda", "deploy", "--iam-role", &iam_role)
-        .current_dir(&function_dir)
-        .env("AWS_REGION", region)
-        .run()
-        .with_context(|| format!("Failed to deploy {function_name}"))?;
+        cmd!("cargo", "lambda", "deploy", "--iam-role", &iam_role)
+            .current_dir(function)
+            .env("AWS_REGION", region)
+            .run()
+            .with_context(|| format!("Failed to deploy {function_name}"))?;
+    } else {
+        anyhow::bail!("Unknown function: {function}. Available: lambda");
+    }
 
     Ok(())
 }
 
-async fn update_api_gateway(_region: &str, _env: &str) -> Result<()> {
-    // TODO: Implement API Gateway update
-    println!("⚠️  API Gateway update not yet implemented");
+async fn update_api_gateway(region: &str, env: &str) -> Result<()> {
+    println!("🌐 Setting up API Gateway for {env} environment");
+
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new(region.to_string()))
+        .load()
+        .await;
+
+    let _api_client = aws_sdk_apigateway::Client::new(&config);
+    let lambda_client = aws_sdk_lambda::Client::new(&config);
+
+    // Get Lambda function ARN
+    let function_name = format!("passkey-lambda-{env}");
+    let function_response = lambda_client
+        .get_function()
+        .function_name(&function_name)
+        .send()
+        .await
+        .with_context(|| format!("Failed to get Lambda function {function_name}"))?;
+
+    let function_arn = function_response
+        .configuration()
+        .and_then(|c| c.function_arn())
+        .ok_or_else(|| anyhow::anyhow!("Lambda function ARN not found"))?;
+
+    println!("✅ Found Lambda function: {function_arn}");
+    println!("📝 API Gateway integration will be implemented in next phase");
+
     Ok(())
 }
 
 fn run_integration_tests() -> Result<()> {
-    // TODO: Implement integration tests
-    println!("⚠️  Integration tests not yet implemented");
+    println!("🔄 Running integration tests...");
+
+    // Check if there are any integration test files
+    let test_dirs = vec!["lambda/tests", "shared/tests", "tests"];
+    let mut found_tests = false;
+
+    for test_dir in test_dirs {
+        if Path::new(test_dir).exists() {
+            println!("Found integration tests in: {test_dir}");
+            found_tests = true;
+        }
+    }
+
+    if found_tests {
+        cmd!("cargo", "test", "--test", "*")
+            .run()
+            .context("Integration tests failed")?;
+        println!("✅ Integration tests completed successfully");
+    } else {
+        println!(
+            "📝 No integration tests found. Create tests in lambda/tests/ or tests/ directory"
+        );
+    }
+
     Ok(())
 }
 
-async fn clean_aws_resources(_env: &str) -> Result<()> {
-    // TODO: Implement AWS resource cleanup
-    println!("⚠️  AWS resource cleanup not yet implemented");
+async fn clean_aws_resources(env: &str) -> Result<()> {
+    println!("🗑️  Cleaning AWS resources for environment: {env}");
+
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .load()
+        .await;
+
+    let dynamodb = aws_sdk_dynamodb::Client::new(&config);
+    let lambda_client = aws_sdk_lambda::Client::new(&config);
+    let iam_client = aws_sdk_iam::Client::new(&config);
+
+    // Delete DynamoDB tables
+    let db_config = DynamoDbConfig::new("passkey", env, "us-east-1");
+    let tables = vec![
+        "users",
+        "credentials",
+        "sessions",
+        "pending-users",
+        "app-configs",
+    ];
+
+    for table_type in tables {
+        let table_name = db_config.table_name(table_type);
+        match dynamodb.delete_table().table_name(&table_name).send().await {
+            Ok(_) => println!("✅ Deleted table: {table_name}"),
+            Err(e) => {
+                if e.to_string().contains("ResourceNotFoundException") {
+                    println!("⚠️  Table {table_name} does not exist");
+                } else {
+                    println!("❌ Failed to delete table {table_name}: {e}");
+                }
+            }
+        }
+    }
+
+    // Delete Lambda function
+    let function_name = format!("passkey-lambda-{env}");
+    match lambda_client
+        .delete_function()
+        .function_name(&function_name)
+        .send()
+        .await
+    {
+        Ok(_) => println!("✅ Deleted Lambda function: {function_name}"),
+        Err(e) => {
+            if e.to_string().contains("ResourceNotFoundException") {
+                println!("⚠️  Lambda function {function_name} does not exist");
+            } else {
+                println!("❌ Failed to delete Lambda function {function_name}: {e}");
+            }
+        }
+    }
+
+    // Delete IAM role
+    let role_name = format!("passkey-lambda-role-{env}");
+
+    // First detach policies
+    let policies = vec![
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+        "arn:aws:iam::aws:policy/AmazonSESFullAccess",
+    ];
+
+    for policy_arn in policies {
+        let _ = iam_client
+            .detach_role_policy()
+            .role_name(&role_name)
+            .policy_arn(policy_arn)
+            .send()
+            .await;
+    }
+
+    // Then delete role
+    match iam_client.delete_role().role_name(&role_name).send().await {
+        Ok(_) => println!("✅ Deleted IAM role: {role_name}"),
+        Err(e) => {
+            if e.to_string().contains("NoSuchEntity") {
+                println!("⚠️  IAM role {role_name} does not exist");
+            } else {
+                println!("❌ Failed to delete IAM role {role_name}: {e}");
+            }
+        }
+    }
+
+    println!("✅ AWS resource cleanup completed");
+    Ok(())
+}
+
+/// Ensures the Lambda execution role exists and returns its ARN.
+async fn ensure_lambda_role(region: &str, env: &str) -> Result<String> {
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new(region.to_string()))
+        .load()
+        .await;
+
+    let iam_client = aws_sdk_iam::Client::new(&config);
+    let sts_client = aws_sdk_sts::Client::new(&config);
+
+    // Get current AWS account ID
+    let caller_identity = sts_client.get_caller_identity().send().await?;
+    let account_id = caller_identity.account().unwrap_or("123456789012");
+
+    let role_name = format!("passkey-lambda-role-{env}");
+    let role_arn = format!("arn:aws:iam::{account_id}:role/{role_name}");
+
+    // Check if role exists
+    match iam_client.get_role().role_name(&role_name).send().await {
+        Ok(_) => {
+            println!("✅ IAM role {role_name} already exists");
+            Ok(role_arn)
+        }
+        Err(_) => {
+            println!("🔑 Creating IAM role: {role_name}");
+            create_iam_roles(region, env).await?;
+            Ok(role_arn)
+        }
+    }
+}
+
+/// Runs pre-commit checks including fmt, check, clippy, and test.
+fn precommit_command(skip_fmt: bool, skip_clippy: bool, skip_test: bool) -> Result<()> {
+    let mut has_errors = false;
+
+    // 1. Run cargo fmt
+    if !skip_fmt {
+        println!("🎨 Running cargo fmt...");
+        match cmd!("cargo", "fmt", "--all", "--check").run() {
+            Ok(_) => println!("✅ Code formatting is correct"),
+            Err(_) => {
+                println!("❌ Code formatting issues found. Run 'cargo fmt' to fix them.");
+                has_errors = true;
+            }
+        }
+    } else {
+        println!("⏭️  Skipping cargo fmt");
+    }
+
+    // 2. Run cargo check
+    println!("🔍 Running cargo check...");
+    match cmd!("cargo", "check", "--all-targets", "--all-features").run() {
+        Ok(_) => println!("✅ Compilation check passed"),
+        Err(_) => {
+            println!("❌ Compilation check failed");
+            has_errors = true;
+        }
+    }
+
+    // 3. Run cargo clippy
+    if !skip_clippy {
+        println!("📎 Running cargo clippy...");
+        match cmd!(
+            "cargo",
+            "clippy",
+            "--all-targets",
+            "--all-features",
+            "--",
+            "-D",
+            "warnings"
+        )
+        .run()
+        {
+            Ok(_) => println!("✅ Clippy linting passed"),
+            Err(_) => {
+                println!("❌ Clippy linting failed");
+                has_errors = true;
+            }
+        }
+    } else {
+        println!("⏭️  Skipping cargo clippy");
+    }
+
+    // 4. Run cargo test
+    if !skip_test {
+        println!("🧪 Running cargo test...");
+        match cmd!("cargo", "test", "--all-targets", "--all-features").run() {
+            Ok(_) => println!("✅ All tests passed"),
+            Err(_) => {
+                println!("❌ Tests failed");
+                has_errors = true;
+            }
+        }
+    } else {
+        println!("⏭️  Skipping cargo test");
+    }
+
+    if has_errors {
+        anyhow::bail!("Pre-commit checks failed! Please fix the issues above.");
+    }
+
+    println!("{}", "🎉 All pre-commit checks passed!".green().bold());
     Ok(())
 }

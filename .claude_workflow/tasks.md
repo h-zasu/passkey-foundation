@@ -3,286 +3,571 @@
 ## 前段階確認
 `.claude_workflow/design.md`を読み込みました。
 
-## タスク実行計画
+## タスク分解戦略
 
-### Phase 1: プロジェクト基盤構築
-**期間**: 1-2日
-**目的**: 基本的なCargoワークスペースとプロジェクト構造の構築
+設計書に基づき、以下の4つのPhaseで段階的に実装を進める：
 
-#### 1.1 Cargoワークスペース設定
-- [ ] **未着手** `Cargo.toml`ワークスペース設定作成
-- [ ] **未着手** `.cargo/config.toml`設定ファイル作成（xtaskエイリアス設定）
-- [ ] **未着手** `lambda/Cargo.toml`作成（GraphQL Lambda機能）
-- [ ] **未着手** `shared/Cargo.toml`作成（共通ライブラリ）
-- [ ] **未着手** `xtask/Cargo.toml`作成（デプロイメント自動化）
+1. **Phase 1: 基盤実装** - ワークスペース、共通モジュール、DynamoDB基盤
+2. **Phase 2: コア機能実装** - WebAuthn、OTP、メール、JWT
+3. **Phase 3: GraphQL API実装** - スキーマ、リゾルバー、Lambda関数
+4. **Phase 4: 統合・デプロイ** - xtask完全実装、テスト、AWSデプロイ
 
-#### 1.2 基本ディレクトリ構造作成
-- [ ] **未着手** `lambda/src/`ディレクトリ構造作成
-- [ ] **未着手** `shared/src/`ディレクトリ構造作成
-- [ ] **未着手** `xtask/src/`ディレクトリ作成
+## ドキュメント構造の更新
 
-#### 1.3 基本ファイル作成
-- [ ] **未着手** `lambda/src/main.rs`スケルトン作成
-- [ ] **未着手** `shared/src/lib.rs`スケルトン作成
-- [ ] **未着手** `xtask/src/main.rs`スケルトン作成
+新しいプロジェクト構造に合わせて：
+- **README.md**: プロジェクト概要、セットアップ手順、API利用例
+- **CONTRIBUTING.md**: 開発プロセス、技術仕様、コーディング規約
+- **.claude_workflow/**: 実装タスクの詳細管理
 
-### Phase 2: 共通ライブラリ実装
-**期間**: 2-3日
-**目的**: 全体で使用する共通機能の実装
+## Phase 1: 基盤実装 ✅ **完了** (Priority: HIGH)
+**ブランチ**: `feature/passkey-foundation`  
+**PR**: [Passkey認証基盤: Phase 1完了 + ユーザー自由登録・DynamoDB暗号化機能](https://github.com/h-zasu/passkey-foundation/pull/2)  
+**Status**: PRレビュー中（PR 1クローズのため新規作成）
 
-#### 2.1 基本型定義
-- [ ] **未着手** `shared/src/types.rs`実装
-  - UserRole enum定義
-  - User, Credential, Session構造体
-  - PendingUser, AppConfig構造体
-  - GraphQL入出力型
+### 1.1 Cargoワークスペース整理 ✅
+**Status**: 完了  
+**Estimate**: 30分  
+**Dependencies**: None  
 
-#### 2.2 設定管理実装
-- [ ] **未着手** `shared/src/config.rs`実装
-  - 環境変数からの設定読み込み
-  - AppConfig管理機能
-  - AWS設定初期化
+- [x] `Cargo.toml` ワークスペース設定更新
+  - async-graphql 7.x 追加
+  - lambda_runtime 0.14.2 追加
+  - webauthn-rs 0.5.2 追加
+  - その他必要依存関係追加
+- [x] `lambda/Cargo.toml` 依存関係更新
+- [x] `shared/Cargo.toml` 依存関係更新
+- [x] `xtask/Cargo.toml` 依存関係更新
 
-#### 2.3 DynamoDB基本操作実装
-- [ ] **未着手** `shared/src/dynamodb.rs`実装
-  - DynamoDBクライアント初期化
-  - 基本CRUD操作
-  - テーブル名管理
-  - エラーハンドリング
+### 1.2 sharedクレート基盤実装 ✅
+**Status**: 完了  
+**Estimate**: 2時間  
+**Dependencies**: 1.1 完了後  
 
-#### 2.4 エラーハンドリング実装
-- [ ] **未着手** `shared/src/errors.rs`実装
-  - PasskeyError型定義
-  - thiserrorベースエラー実装
+- [x] `shared/src/types.rs` 拡張
+  - PendingUser 構造体追加
+  - AppConfig 構造体拡張
+  - SessionType, UserRole 列挙型追加
+  - GraphQL対応用のデシリアライザ追加
+- [x] `shared/src/config.rs` 新規作成
+  - 環境変数管理
+  - AWS SDK設定
+  - WebAuthn設定
+- [x] `shared/src/errors.rs` 新規作成
+  - PasskeyError エラー型定義
+  - thiserror 統合
   - GraphQLエラー変換
 
-#### 2.5 ユーティリティ実装
-- [ ] **未着手** `shared/src/utils.rs`実装
-  - UUID生成
-  - タイムスタンプ処理
-  - Base64エンコード/デコード
+### 1.3 DynamoDB操作拡張 ✅
+**Status**: 完了  
+**Estimate**: 3時間  
+**Dependencies**: 1.2 完了後  
 
-### Phase 3: WebAuthn・認証機能実装
-**期間**: 3-4日
-**目的**: 認証機能のコア実装
+- [x] `shared/src/dynamodb.rs` 拡張
+  - PendingUsers テーブル作成関数
+  - AppConfigs テーブル作成関数
+  - Users/Credentials/Sessions テーブルのapp_id対応
+  - GSI設定とTTL設定
+  - DynamoDB暗号化設定（段階的セキュリティレベル対応）
+- [x] CRUD操作関数実装
+  - create_user, get_user, update_user
+  - create_credential, get_credentials_by_user
+  - create_session, get_session, update_session
+  - create_pending_user, get_pending_user, delete_pending_user
+  - get_app_config
 
-#### 3.1 WebAuthn統合
-- [ ] **未着手** `shared/src/webauthn.rs`実装
-  - WebAuthn設定初期化
+### 1.4 基本xtaskコマンド実装 ✅
+**Status**: 完了  
+**Estimate**: 2時間  
+**Dependencies**: 1.3 完了後  
+
+- [x] `xtask/src/main.rs` 拡張
+  - CLI構造定義（init, deploy, domain, test, clean）
+  - AWSクライアント初期化
+- [x] initコマンド実装
+  - DynamoDBテーブル作成（新テーブル含む）
+  - IAMロール作成スケルトン
+  - 環境設定ファイル生成
+- [x] cleanコマンド実装
+
+### 1.5 Phase 1 単体テスト実装 ✅
+**Status**: 完了  
+**Estimate**: 1時間  
+**Dependencies**: 1.4 完了後  
+
+- [x] shared クレートの単体テスト
+  - types.rs のデータ構造テスト
+  - config.rs の設定読み込みテスト
+  - errors.rs のエラー変換テスト
+- [x] DynamoDB操作の単体テスト
+- [x] xtask基本機能テスト
+
+### 1.6 Phase 1 完了・PR提出 ✅
+**Status**: 完了  
+**Estimate**: 30分  
+**Dependencies**: 1.5 完了後  
+
+- [x] ブランチ作成: `feature/passkey-foundation`
+- [x] PR作成・提出
+- [x] CI/CDパイプライン確認
+- [x] コードレビュー依頼
+
+---
+
+## Phase 2: コア機能実装 (Priority: HIGH)
+**予定ブランチ**: `feature/phase2-core-features`  
+**Dependencies**: Phase 1 PR承認・マージ後
+
+### 2.1 WebAuthn統合
+**Status**: 未着手  
+**Estimate**: 4時間  
+**Dependencies**: Phase 1 完了後  
+
+- [ ] `shared/src/webauthn.rs` 新規作成
+  - WebAuthnインスタンス作成関数
   - 登録チャレンジ生成
+  - 登録レスポンス検証
   - 認証チャレンジ生成
-  - クリデンシャル検証
+  - 認証レスポンス検証
+- [ ] WebAuthn設定のアプリ毎カスタマイズ
+- [ ] エラーハンドリング統合
 
-#### 3.2 OTP機能実装
-- [ ] **未着手** `shared/src/otp.rs`実装
-  - OTP生成機能
-  - ハッシュ化・検証機能
-  - 試行回数制限
-  - 有効期限管理
+### 2.1.5 ユーザー登録方式拡張（新機能）
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: 2.1 完了後  
 
-#### 3.3 JWT認証実装
-- [ ] **未着手** `shared/src/jwt.rs`実装
-  - JWT生成機能
-  - JWT検証機能
-  - クレーム管理
-  - トークンrefresh機能
+- [ ] `shared/src/types.rs` 拡張
+  - RegistrationMode enum追加（InviteOnly, PublicRegistration）
+  - AppConfig構造体拡張（registration_mode, auto_approve_registrationフィールド）
+- [ ] 権限チェックロジック基盤実装
+  - 登録方式チェック関数
+  - アプリ設定取得・キャッシュ機能拡張
 
-#### 3.4 メール送信機能実装
-- [ ] **未着手** `shared/src/email.rs`実装
-  - SESクライアント初期化
-  - OTP招待メール送信
-  - HTMLテンプレート処理
-  - 送信履歴記録
+### 2.1.7 DynamoDB暗号化設定強化
+**Status**: 未着手  
+**Estimate**: 1.5時間  
+**Dependencies**: 2.1.5 完了後  
 
-### Phase 4: DynamoDBデータアクセス層実装
-**期間**: 2-3日
-**目的**: データベース操作の完全実装
+- [ ] `shared/src/config.rs` 暗号化設定追加
+  - EncryptionLevel enum（Standard, Enterprise）
+  - 環境変数`ENCRYPTION_LEVEL`読み込み
+  - KMSキー設定管理
+- [ ] `shared/src/dynamodb.rs` 暗号化実装
+  - テーブル作成時の暗号化設定適用
+  - Customer managed keys対応
+  - 暗号化設定のバリデーション
 
-#### 4.1 ユーザー管理操作
-- [ ] **未着手** `shared/src/dynamodb/users.rs`実装
-  - ユーザー作成・取得・更新
-  - メールでのユーザー検索
-  - アプリIDによるフィルタリング
+### 2.2 OTP機能実装
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: Phase 1 完了後  
 
-#### 4.2 認証情報管理操作
-- [ ] **未着手** `shared/src/dynamodb/credentials.rs`実装
-  - クリデンシャル保存・取得
-  - ユーザーのクリデンシャル一覧
-  - カウンター更新
+- [ ] `shared/src/otp.rs` 新規作成
+  - 6桁OTP生成関数
+  - ランダムソルト生成
+  - SHA-256ハッシュ関数
+  - OTP検証関数（試行回数制限含む）
+- [ ] OTP有効期限管理
+- [ ] セキュリティテスト（ブルートフォース対策）
 
-#### 4.3 セッション管理操作
-- [ ] **未着手** `shared/src/dynamodb/sessions.rs`実装
-  - セッション作成・取得・削除
-  - TTL自動削除設定
-  - チャレンジ管理
+### 2.3 メール送信機能
+**Status**: 未着手  
+**Estimate**: 3時間  
+**Dependencies**: 2.2 完了後  
 
-#### 4.4 事前登録ユーザー管理操作
-- [ ] **未着手** `shared/src/dynamodb/pending_users.rs`実装
-  - 事前登録ユーザー作成・取得
-  - OTP試行回数管理
-  - 有効期限管理
+- [ ] `shared/src/email.rs` 新規作成
+  - AWS SESクライアント統合
+  - ユーザー招待メールテンプレート
+  - 認証完了通知メールテンプレート
+  - HTMLメール対応
+- [ ] メール送信失敗時のリトライ機構
+- [ ] 送信履歴ログ出力
 
-#### 4.5 アプリ設定管理操作
-- [ ] **未着手** `shared/src/dynamodb/app_configs.rs`実装
-  - アプリ設定取得・更新
-  - 設定キャッシュ機能
+### 2.4 JWT認証システム
+**Status**: 未着手  
+**Estimate**: 3時間  
+**Dependencies**: Phase 1 完了後  
 
-### Phase 5: GraphQL API実装
-**期間**: 4-5日
-**目的**: GraphQL APIの完全実装
+- [ ] `shared/src/jwt.rs` 新規作成
+  - JWTクレーム構造体定義
+  - JWT生成関数（アプリ固有シークレット）
+  - JWT検証関数
+  - JWTリフレッシュ機能（オプション）
+- [ ] アプリ毎の署名キー管理
+- [ ] JWTリボケーション機構（将来拡張）
 
-#### 5.1 GraphQLスキーマ定義
-- [ ] **未着手** `lambda/src/schema.rs`実装
-  - async-graphql型定義
-  - Query/Mutation/Subscription定義
-  - Context型定義
+### 2.5 Phase 2 単体テスト実装
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: 2.4 完了後  
 
-#### 5.2 認証ミドルウェア実装
-- [ ] **未着手** `lambda/src/auth.rs`実装
-  - JWT検証ミドルウェア
-  - ユーザー認証状態管理
-  - 権限チェック機能
+- [ ] WebAuthn統合テスト
+  - チャレンジ生成・検証テスト
+  - 公開鍵処理テスト
+- [ ] OTP機能テスト
+  - 生成・検証・期限切れテスト
+  - ブルートフォース対策テスト
+- [ ] メール送信テスト
+  - SESシミュレータテスト
+  - テンプレート処理テスト
+- [ ] JWT認証テスト
+  - 生成・検証・期限切れテスト
+  - アプリ別署名テスト
+- [ ] ユーザー登録方式テスト（新機能）
+  - RegistrationMode enum テスト
+  - AppConfig拡張フィールドテスト
+  - 権限チェックロジックテスト
+- [ ] DynamoDB暗号化テスト
+  - 暗号化設定バリデーションテスト
+  - AWS managed keys vs Customer managed keys テスト
+  - 環境変数設定テスト
 
-#### 5.3 Query Resolver実装
-- [ ] **未着手** `lambda/src/resolvers/query.rs`実装
-  - user クエリ
-  - users クエリ（ページネーション）
-  - pendingUsers クエリ
-  - appConfig クエリ
+### 2.6 Phase 2 完了・PR提出
+**Status**: 未着手  
+**Estimate**: 30分  
+**Dependencies**: 2.5 完了後  
 
-#### 5.4 ユーザー管理Mutation実装
-- [ ] **未着手** `lambda/src/resolvers/user_management.rs`実装
-  - inviteUser Mutation
-  - updateUserRole Mutation
-  - deactivateUser Mutation
+- [ ] ブランチ作成: `feature/phase2-core-features`
+- [ ] PR作成・提出
+- [ ] CI/CDパイプライン確認
+- [ ] コードレビュー依頼
 
-#### 5.5 認証フローMutation実装
-- [ ] **未着手** `lambda/src/resolvers/auth_flow.rs`実装
-  - verifyOtpAndStartRegistration Mutation
-  - completeRegistration Mutation
-  - startAuthentication Mutation
-  - completeAuthentication Mutation
+---
 
-#### 5.6 Subscription実装
-- [ ] **未着手** `lambda/src/resolvers/subscription.rs`実装
-  - userRegistered Subscription
-  - リアルタイム通知機能
+## Phase 3: GraphQL API実装 (Priority: HIGH)
+**予定ブランチ**: `feature/phase3-graphql-api`  
+**Dependencies**: Phase 2 PR承認・マージ後
 
-### Phase 6: Lambda統合・メイン実装
-**期間**: 2日
-**目的**: Lambda関数としての統合
+### 3.1 Lambda関数基盤
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: Phase 2 完了後  
 
-#### 6.1 Lambdaエントリーポイント実装
-- [ ] **未着手** `lambda/src/main.rs`完全実装
-  - AWS設定初期化
-  - GraphQLスキーマ作成
-  - Lambda runtime統合
-  - エラーハンドリング
+- [ ] `lambda/src/main.rs` 書き換え
+  - Lambdaエントリーポイント実装
+  - AWS SDKクライアント初期化
+  - GraphQLコンテキスト作成
+  - async-graphql-lambda 統合
+- [ ] `lambda/src/context.rs` 新規作成
+  - GraphQLContext構造体定義
+  - AWSクライアント保持
+  - WebAuthnインスタンス管理
+  - AppConfigキャッシュ
 
-#### 6.2 CORS・セキュリティ設定
-- [ ] **未着手** CORS設定実装
-- [ ] **未着手** セキュリティヘッダー設定
-- [ ] **未着手** レート制限設定
+### 3.2 GraphQLスキーマ定義
+**Status**: 未着手  
+**Estimate**: 4時間  
+**Dependencies**: 3.1 完了後  
 
-### Phase 7: xtask自動化ツール実装
-**期間**: 3-4日
-**目的**: デプロイメント自動化
+- [ ] `lambda/src/schema.rs` 新規作成
+  - Query型定義
+  - Mutation型定義
+  - 入力型定義（Input types）
+  - 出力型定義（Output types）
+  - 列挙型定義（Enums）
+- [ ] カスタムスカラー定義（DateTime, JSON）
+- [ ] ページネーション型定義
 
-#### 7.1 CLI基盤実装
-- [ ] **未着手** `xtask/src/main.rs`CLI構造実装
-  - clap設定
-  - サブコマンド定義
+### 3.2.5 ユーザー登録スキーマ拡張（新機能）
+**Status**: 未着手  
+**Estimate**: 1時間  
+**Dependencies**: 3.2 完了後  
 
-#### 7.2 AWS初期化機能
-- [ ] **未着手** `xtask/src/init.rs`実装
-  - DynamoDBテーブル作成
-  - IAMロール作成
-  - 初期設定確認
+- [ ] GraphQLスキーマ拡張
+  - RegistrationMode enum追加
+  - AppConfig型拡張（registration_mode, auto_approve_registrationフィールド）
+  - selfRegister mutation追加
 
-#### 7.3 デプロイ機能実装
-- [ ] **未着手** `xtask/src/deploy.rs`実装
-  - cargo lambda build統合
-  - Lambda関数デプロイ
-  - 環境変数設定
+### 3.3 リゾルバー基盤実装
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: 3.2 完了後  
 
-#### 7.4 API Gateway設定機能
-- [ ] **未着手** `xtask/src/gateway.rs`実装
+- [ ] `lambda/src/resolvers/mod.rs` 新規作成
+- [ ] `lambda/src/resolvers/query.rs` 新規作成
+  - user, users クエリリゾルバー
+  - pendingUsers, appConfig クエリリゾルバー
+  - session クエリリゾルバー
+- [ ] ページネーションロジック
+- [ ] DataLoaderパターン基盤（N+1問題対策）
+
+### 3.4 認証フローリゾルバー
+**Status**: 未着手  
+**Estimate**: 7時間  
+**Dependencies**: 3.3 完了後  
+
+- [ ] `lambda/src/resolvers/mutation.rs` 新規作成
+- [ ] inviteUser ミューテーション
+  - ユーザー招待フロー
+  - OTP生成とメール送信
+  - PendingUsersテーブル登録
+- [ ] selfRegister ミューテーション（新機能）
+  - 登録方式チェック（PUBLIC_REGISTRATION確認）
+  - ユーザー自由登録フロー
+  - OTP生成とメール送信
+  - PendingUsersテーブル登録
+- [ ] verifyOtpAndStartRegistration ミューテーション
+  - OTP検証ロジック
+  - WebAuthn登録チャレンジ生成
+  - セッション作成
+- [ ] completeRegistration ミューテーション
+  - WebAuthnレスポンス検証
+  - ユーザー作成と認証情報保存
+  - JWT発行
+  - PendingUsers削除
+
+### 3.5 認証フローリゾルバー
+**Status**: 未着手  
+**Estimate**: 4時間  
+**Dependencies**: 3.4 完了後  
+
+- [ ] startAuthentication ミューテーション
+  - ユーザー存在確認
+  - 登録済み認証情報取得
+  - WebAuthn認証チャレンジ生成
+  - セッション作成
+- [ ] completeAuthentication ミューテーション
+  - WebAuthnレスポンス検証
+  - カウンター検証・更新
+  - JWT発行
+  - last_login更新
+
+### 3.6 管理機能リゾルバー
+**Status**: 未着手  
+**Estimate**: 3時間  
+**Dependencies**: 3.5 完了後  
+
+- [ ] updateUser ミューテーション
+- [ ] deactivateUser ミューテーション
+- [ ] deleteCredential ミューテーション
+- [ ] updateCredentialName ミューテーション
+- [ ] 管理者権限チェックミドルウェア
+
+### 3.7 エラーハンドリング統合
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: 3.6 完了後  
+
+- [ ] `lambda/src/errors.rs` 更新
+  - GraphQLエラー変換実装
+  - エラーコード体系化
+  - セキュリティ考慮したエラーメッセージ
+- [ ] 構造化ログ出力実装（tracing）
+- [ ] CloudWatchログ統合
+
+### 3.8 Phase 3 統合テスト実装
+**Status**: 未着手  
+**Estimate**: 4時間  
+**Dependencies**: 3.7 完了後  
+
+- [ ] GraphQLエンドツーエンドテスト
+  - 全リゾルバーの動作確認
+  - 認証フロー統合テスト（inviteUser + 完了フロー）
+  - 自由登録フロー統合テスト（selfRegister + 完了フロー）
+  - 登録方式制御テスト（INVITE_ONLY vs PUBLIC_REGISTRATION）
+  - エラーハンドリングテスト
+- [ ] Lambda関数統合テスト
+  - ローカル実行テスト
+  - AWS環境シミュレーションテスト
+- [ ] DynamoDB統合テスト
+  - 実際のテーブル操作テスト
+  - パフォーマンステスト
+
+### 3.9 Phase 3 完了・PR提出
+**Status**: 未着手  
+**Estimate**: 30分  
+**Dependencies**: 3.8 完了後  
+
+- [ ] ブランチ作成: `feature/phase3-graphql-api`
+- [ ] PR作成・提出
+- [ ] CI/CDパイプライン確認
+- [ ] コードレビュー依頼
+
+---
+
+## Phase 4: 統合・デプロイ (Priority: MEDIUM)
+**予定ブランチ**: `feature/phase4-deployment`  
+**Dependencies**: Phase 3 PR承認・マージ後
+
+### 4.1 xtaskデプロイ機能
+**Status**: 未着手  
+**Estimate**: 5時間  
+**Dependencies**: Phase 3 完了後  
+
+- [ ] deployコマンド実装
+  - cargo lambda build --release --arm64
+  - Lambda関数作成/更新
+  - 環境変数設定（暗号化設定含む）
+  - IAMロールアタッチ
+- [ ] KMS暗号化設定自動化
+  - Customer managed keys作成（Enterpriseモード）
+  - キーポリシー設定
+  - Lambda環境変数KMS暗号化
+  - DynamoDBテーブル暗号化設定
+- [ ] API Gateway設定自動化
   - REST API作成
   - GraphQLエンドポイント設定
-  - デプロイメント管理
+  - CORS設定
+  - Lambda統合設定
 
-#### 7.5 カスタムドメイン機能
-- [ ] **未着手** `xtask/src/domain.rs`実装
+### 4.2 カスタムドメイン設定
+**Status**: 未着手  
+**Estimate**: 3時間  
+**Dependencies**: 4.1 完了後  
+
+- [ ] domainコマンド実装
   - ACM証明書作成
-  - ドメイン関連付け
-  - Route 53設定
+  - ドメイン検証自動化
+  - API Gatewayカスタムドメイン設定
+  - Route 53設定（オプション）
 
-### Phase 8: テスト実装
-**期間**: 2-3日
-**目的**: 品質保証
+### 4.3 テスト実装
+**Status**: 未着手  
+**Estimate**: 6時間  
+**Dependencies**: Phase 3 完了後  
 
-#### 8.1 単体テスト実装
-- [ ] **未着手** shared クレートのテスト
-- [ ] **未着手** lambda クレートのテスト
-- [ ] **未着手** モック機能実装
+- [ ] 単体テスト実装
+  - sharedクレートの各モジュールテスト
+  - WebAuthn処理テスト
+  - OTP生成・検証テスト
+  - JWT生成・検証テスト
+- [ ] 統合テスト実装
+  - GraphQLリゾルバーエンドツーエンドテスト
+  - DynamoDB Localテスト
+  - SESシミュレータテスト
+- [ ] testコマンド実装
+  - 単体テスト実行
+  - 統合テスト実行
+  - カバレッジレポート生成
 
-#### 8.2 統合テスト実装
-- [ ] **未着手** GraphQL API統合テスト
-- [ ] **未着手** WebAuthnフローE2Eテスト
-- [ ] **未着手** DynamoDBローカルテスト
+### 4.4 監視・ログ設定
+**Status**: 未着手  
+**Estimate**: 3時間  
+**Dependencies**: 4.1 完了後  
 
-#### 8.3 パフォーマンステスト
-- [ ] **未着手** 負荷テスト実装
-- [ ] **未着手** レスポンス時間測定
+- [ ] CloudWatchメトリクス設定
+- [ ] CloudWatchアラーム設定
+- [ ] 構造化ログ出力実装
+- [ ] セキュリティイベント監視
 
-### Phase 9: ドキュメント・仕上げ
-**期間**: 1-2日
-**目的**: プロジェクト完成
+### 4.5 ドキュメント作成
+**Status**: 未着手  
+**Estimate**: 2時間  
+**Dependencies**: 全機能完了後  
 
-#### 9.1 設定ファイル調整
-- [ ] **未着手** `.gitignore` 作成
-- [ ] **未着手** `README.md` 更新（必要に応じて）
+- [ ] APIドキュメント作成（GraphQLスキーマベース）
+- [ ] デプロイマニュアル作成
+- [ ] クライアント統合ガイド作成
+- [ ] トラブルシューティングガイド作成
 
-#### 9.2 最終テスト・検証
-- [ ] **未着手** 全機能動作確認
-- [ ] **未着手** セキュリティ検証
-- [ ] **未着手** パフォーマンス確認
+### 4.6 Phase 4 完了・PR提出
+**Status**: 未着手  
+**Estimate**: 30分  
+**Dependencies**: 4.5 完了後  
 
-## 実行順序と依存関係
+- [ ] ブランチ作成: `feature/phase4-deployment`
+- [ ] PR作成・提出
+- [ ] CI/CDパイプライン確認
+- [ ] 本番デプロイ準備確認
+- [ ] コードレビュー依頼
 
-### 実行ルール
-1. **段階的進行**: Phase順序で実行し、前のPhaseが完了してから次へ
-2. **単一タスク集中**: 複数タスクの同時進行は行わない
-3. **エラー解決優先**: エラーが発生したら解決してから次のタスク
-4. **テスト駆動**: 実装完了後は必ずテストで動作確認
+---
 
-### 依存関係
-- Phase 2 → Phase 1完了後
-- Phase 3,4 → Phase 2完了後
-- Phase 5 → Phase 3,4完了後
-- Phase 6 → Phase 5完了後
-- Phase 7 → Phase 6完了後
-- Phase 8 → Phase 7完了後
-- Phase 9 → Phase 8完了後
+## リスク・ブロッカー分析
 
-## 優先度設定
-- **高**: Phase 1-6（コア機能）
-- **中**: Phase 7-8（自動化・テスト）
-- **低**: Phase 9（仕上げ）
+### 高リスクタスク
+1. **WebAuthn統合 (2.1)**: 新しいライブラリ、複雑な仕様
+2. **GraphQLスキーマ設計 (3.2)**: 型安全性、パフォーマンス考慮
+3. **AWSデプロイ自動化 (4.1)**: 複数サービス連携の複雑さ
 
-## 成功基準
-各Phaseの完了基準：
-- [ ] 全タスクが「完了」状態
-- [ ] ビルドエラーなし
-- [ ] 基本的なテストパス
-- [ ] 次Phaseの前提条件満足
+### 依存関係クリティカルパス
+1. Phase 1 → Phase 2 → Phase 3 → Phase 4
+2. 各Phase内での依存関係に注意
+3. WebAuthn統合が全体のボトルネック
 
-## 注意点
-- Rust edition 2024を使用
-- async/awaitパターンで実装
-- セキュリティベストプラクティス遵守
-- AWS Lambda制約内での実装
-- エラーは適切にログ出力し、内部詳細を隠蔽
+### 緩和策
+1. **早期プロトタイピング**: WebAuthnの簡単なテストを優先
+2. **モジュール化**: 各コンポーネントを独立してテスト可能に
+3. **段階リリース**: 基本機能から段階的に機能拡張
 
-## 次ステップ
-Phase 1「プロジェクト基盤構築」から開始
+## 成功指標
+
+### Phase 1 完了時 ✅
+- [x] cargo build が全クレートで成功
+- [x] DynamoDBテーブルが作成される
+- [x] 基本CRUD操作が動作
+- [x] 単体テストが全て成功
+- [x] PR提出・レビュー中
+
+### Phase 2 完了時
+- [ ] WebAuthnチャレンジ生成・検証が動作
+- [ ] OTP生成・検証が動作
+- [ ] メール送信が成功
+- [ ] JWT生成・検証が動作
+
+### Phase 3 完了時
+- [ ] GraphQLスキーマがコンパイル
+- [ ] 全リゾルバーが実装される
+- [ ] Lambda関数がローカルで動作
+- [ ] エンドツーエンドの認証フローが動作
+
+### Phase 4 完了時
+- [ ] AWSへのデプロイが成功
+- [ ] API Gateway経由でGraphQL APIにアクセス可能
+- [ ] カスタムドメインでHTTPSアクセス可能
+- [ ] 監視・ログが正常動作
+
+## タスク総計
+
+- **総タスク数**: 59タスク（ユーザー自由登録 + DynamoDB暗号化強化）
+- **総作業時間**: 約76.5時間
+- **完了タスク数**: 11タスク (Phase 1完了)
+- **残りタスク数**: 48タスク
+- **新機能追加**: 
+  - ユーザー自由登録（+4時間）
+  - DynamoDB暗号化強化（+2.5時間）
+- **クリティカルパス**: Phase 1 ✅ → Phase 2 → Phase 3 → Phase 4
+- **Phase 1完了**: ✅ (PR提出済み)
+- **残り完了目標**: 2-3週間
+
+## 実行ルール
+
+### 段階的実行
+1. **Phaseごとの進行**: 前PhaseのPRがマージされてから次へ
+2. **ブランチ戦略**: 各Phaseで新しいfeatureブランチを作成
+3. **PR駆動開発**: 各Phase完了時にPR提出・レビュー
+4. **単一タスク集中**: 複数タスクを同時並行で進めない
+5. **エラー優先解決**: エラーを無視して次のステップに進まない
+6. **段階的変更**: 一度に全てを変更せず、小さな変更を積み重ねる
+
+### タスク管理
+1. **進捗の可視化**: 各タスクのステータスを随時更新
+2. **完了確認**: 各タスク完了時に動作確認
+3. **ドキュメント更新**: 変更点を適切に記録
+4. **次のタスクの前提条件確認**: 依存関係の検証
+
+### 品質管理
+1. **Rust edition 2024使用**: 最新の言語機能活用
+2. **async/await**: 非同期処理の統一
+3. **セキュリティ**: ベストプラクティス遵守
+4. **TDD**: 各Phaseで単体テスト実装必須
+5. **CI/CD**: 自動テスト・リント・フォーマットチェック
+6. **コードレビュー**: PR毎の必須レビュー
+
+## 現在の状況
+
+**Phase 1完了**: ✅ PR提出済み (`feature/passkey-foundation`)
+**現在のフェーズ**: Phase 1 PRレビュー待ち
+**新機能追加**: ✅ ユーザー自由登録機能をPhase 2-3に統合
+**セキュリティ強化**: ✅ DynamoDB段階的暗号化をPhase 2・4に統合
+**次のアクション**: Phase 1 PRマージ後、Phase 2開始（新機能・セキュリティ強化含む）
+
+## 次のPhase開始条件
+
+**Phase 2開始**: Phase 1 PRがマージされ次第
+1. 新ブランチ `feature/phase2-core-features` 作成
+2. WebAuthn統合から開始
+3. ユーザー登録方式拡張機能実装（2.1.5）
+4. DynamoDB暗号化設定強化（2.1.7）
+5. 各タスク完了後、単体テスト実装
+6. Phase 2完了後、PR提出
